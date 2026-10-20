@@ -1,0 +1,91 @@
+import { ToneDefinition, GlossaryItem } from '../types.ts';
+
+export const TONE_DEFINITIONS: ToneDefinition[] = [
+  {
+    id: 'spiritual',
+    name: 'معنوی و خودشناسی (فلسفه باطن)',
+    enLabel: 'Spiritual & Philosophical',
+    description: 'لحنی باوقار، عمیق، متأملانه و شاعرانه در عین وضوح بلورین (استفاده از اصطلاحات اصیل مانند «آگاهی»، «حضور»، «مشاهده‌گر»، «سکون»).',
+    sampleKeywords: ['حضور', 'آگاهی ناب', 'مشاهده‌گر خاموش', 'پیکر درون', 'ذهن شرطی‌شده'],
+    systemToneTag: 'معنوی، مراقبه‌ای و خودشناسی عمیق (Reverent, deep, meditative, poetic yet crystal clear)',
+  },
+  {
+    id: 'novel',
+    name: 'رمان و ادبیات داستانی',
+    enLabel: 'Literary & Fiction',
+    description: 'لحنی پویا، سیال، تصویرساز و جذاب با حفظ ریتم ادبی، دیالوگ‌های زنده و لحن کاراکترها.',
+    sampleKeywords: ['جریان سیال ذهن', 'فضاسازی', 'گره‌افکنی', 'کشمکش درونی', 'راوی'],
+    systemToneTag: 'ادبی، روایی و داستانی (Engaging, fluid, descriptive, preserving literary rhythm and dialogue dynamics)',
+  },
+  {
+    id: 'self_help',
+    name: 'روانشناسی، خودیاری و موفقیت',
+    enLabel: 'Self-Help & Psychology',
+    description: 'لحنی شیوا، انگیزه‌بخش، کاربردی و فارسی معاصر و صمیمی و موثر.',
+    sampleKeywords: ['طرز تفکر', 'تاب‌آوری', 'چرخه عادت', 'اقدام موثر', 'بهبود مستمر'],
+    systemToneTag: 'روانشناسی و خودیاری مدرن (Clear, empowering, instructional, and modern Persian)',
+  },
+  {
+    id: 'academic',
+    name: 'علمی، تخصصی و دانشگاهی',
+    enLabel: 'Academic & Technical',
+    description: 'لحنی فوق‌العاده دقیق، رسمی، ساختاریافته با معادل‌های مصوب و دقیق علمی.',
+    sampleKeywords: ['مبتنی بر شواهد', 'فرضیه', 'روش‌شناسی', 'تحلیل تجربی', 'استنتاج'],
+    systemToneTag: 'علمی، رسمی و موشکافانه (Precise, formal, and structured academic Persian)',
+  },
+  {
+    id: 'business',
+    name: 'کسب‌وکار، رهبری و اقتصاد',
+    enLabel: 'Business & Leadership',
+    description: 'لحنی قاطع، حرفه‌ای، مدرن و تجاری متناسب با فضای مدیران و کارآفرینان.',
+    sampleKeywords: ['ارزش‌آفرینی', 'استراتژی رقابتی', 'مقیاس‌پذیری', 'نوآوری تحول‌آفرین'],
+    systemToneTag: 'حرفه‌ای، مدیریتی و کسب‌وکاری (Professional, executive, strategic, and concise)',
+  },
+];
+
+export const DEFAULT_GLOSSARIES: Record<string, GlossaryItem[]> = {
+  spiritual: [
+    { id: 'g1', en: 'Presence', fa: 'حضور', note: 'حالت بیداری در لحظه حال' },
+    { id: 'g2', en: 'Awareness', fa: 'آگاهی', note: 'هوشیاری ناب ورای فکر' },
+    { id: 'g3', en: 'The Mind', fa: 'ذهن شرطی‌شده', note: 'مکانیسم فکری خودکار' },
+    { id: 'g4', en: 'Non-judgment', fa: 'عدم قضاوت', note: 'مشاهده بدون برچسب زدن' },
+    { id: 'g5', en: 'Ego', fa: 'نَفْس کاذب (ایگو)', note: 'هویت ساختگی ذهن' },
+    { id: 'g6', en: 'Inner Body', fa: 'پیکر درون / کالبد درونی', note: 'انرژی حیات در جسم' },
+    { id: 'g7', en: 'Stillness', fa: 'سکون و آرامش درونی', note: 'عمق بی‌حرکت هستی' },
+    { id: 'g8', en: 'Surrender', fa: 'تسلیم درونی / پذیرش', note: 'عدم مقاومت در برابر آنچه هست' },
+    { id: 'g9', en: 'Unmanifested', fa: 'ناپیدا / ساحت غیب', note: 'منشأ هستی ورای فرم' },
+    { id: 'g10', en: 'Pain-body', fa: 'پیکر درد / کالبد رنج', note: 'انباشت احساسات منفی گذشته' },
+  ],
+  novel: [
+    { id: 'gn1', en: 'Stream of consciousness', fa: 'جریان سیال ذهن', note: 'تکنیک روایی' },
+    { id: 'gn2', en: 'Foreshadowing', fa: 'پیش‌آگاهی / نشانه‌گذاری آینده', note: 'عنصر تعلیق' },
+    { id: 'gn3', en: 'Protagonist', fa: 'شخصیت اصلی / قهرمان داستان' },
+    { id: 'gn4', en: 'Antagonist', fa: 'شخصیت ضدقهرمان' },
+    { id: 'gn5', en: 'Epiphany', fa: 'اشراق ناگهانی / لحظه دگرگونی' },
+  ],
+  self_help: [
+    { id: 'gsh1', en: 'Mindset', fa: 'طرز فکر / چارچوب ذهنی' },
+    { id: 'gsh2', en: 'Resilience', fa: 'تاب‌آوری / انعطاف‌پذیری روانی' },
+    { id: 'gsh3', en: 'Habit loop', fa: 'چرخه عادت' },
+    { id: 'gsh4', en: 'Cue', fa: 'نشانه تحریک‌کننده' },
+    { id: 'gsh5', en: 'Craving', fa: 'اشتیاق و تمایل درونی' },
+    { id: 'gsh6', en: 'Cognitive dissonance', fa: 'ناهماهنگی شناختی' },
+    { id: 'gsh7', en: 'Neuroplasticity', fa: 'انعطاف‌پذیری عصبی مغز' },
+    { id: 'gsh8', en: 'Feedback loop', fa: 'حلقه بازخورد' },
+  ],
+  academic: [
+    { id: 'gac1', en: 'Empirical evidence', fa: 'شواهد تجربی' },
+    { id: 'gac2', en: 'Hypothesis', fa: 'فرضیه پژوهش' },
+    { id: 'gac3', en: 'Peer review', fa: 'داوری همتا' },
+    { id: 'gac4', en: 'Methodology', fa: 'روش‌شناسی' },
+    { id: 'gac5', en: 'Quantitative', fa: 'کمی و آماری' },
+    { id: 'gac6', en: 'Qualitative', fa: 'کیفی' },
+  ],
+  business: [
+    { id: 'gb1', en: 'Value proposition', fa: 'ارزش پیشنهادی' },
+    { id: 'gb2', en: 'Scalability', fa: 'مقیاس‌پذیری' },
+    { id: 'gb3', en: 'Disruption', fa: 'نوآوری تحول‌آفرین' },
+    { id: 'gb4', en: 'Competitive advantage', fa: 'مزیت رقابتی پایدار' },
+    { id: 'gb5', en: 'Stakeholder', fa: 'ذینفع' },
+  ],
+};
