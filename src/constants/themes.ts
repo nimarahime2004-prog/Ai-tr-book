@@ -1,4 +1,4 @@
-import { BookThemeId, BookDesignConfig, BorderStyleId, BackgroundPatternId } from '../types.ts';
+import type { BookThemeId, BookDesignConfig, BorderStyleId, BackgroundPatternId } from '../types.ts';
 
 export interface ThemeStyleDefinition {
   id: BookThemeId;

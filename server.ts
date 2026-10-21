@@ -226,18 +226,18 @@ function normalizeBaseUrl(provider: string, baseURL?: string): string {
   }
 
   // Auto-correct common missing /v1 suffixes
-  if (provider === 'openrouter') {
+  if (provider === 'openrouter' || url.includes('openrouter.ai')) {
     if (url === 'https://openrouter.ai' || url === 'http://openrouter.ai') {
       return 'https://openrouter.ai/api/v1';
     }
     if (url.endsWith('/api')) {
       return `${url}/v1`;
     }
-  } else if (provider === 'openai') {
+  } else if (provider === 'openai' || url.includes('openai.com')) {
     if (url === 'https://api.openai.com' || url === 'http://api.openai.com') {
       return 'https://api.openai.com/v1';
     }
-  } else if (provider === 'deepseek') {
+  } else if (provider === 'deepseek' || url.includes('deepseek.com')) {
     if (url === 'https://api.deepseek.com' || url === 'http://api.deepseek.com') {
       return 'https://api.deepseek.com/v1';
     }
@@ -319,7 +319,7 @@ app.post('/api/keys/test', async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey.trim()}`,
-          ...(provider === 'openrouter' ? {
+          ...(provider === 'openrouter' || cleanBaseUrl.includes('openrouter.ai') ? {
             'HTTP-Referer': 'https://aistudio.google.com',
             'X-Title': 'Persian Book Translator'
           } : {})
@@ -597,7 +597,7 @@ ${cleanEnglishText}`;
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${server.apiKey.trim()}`,
-              ...(server.providerType === 'openrouter' ? {
+              ...(server.providerType === 'openrouter' || cleanBaseUrl.includes('openrouter.ai') ? {
                 'HTTP-Referer': 'https://aistudio.google.com',
                 'X-Title': 'Persian Book Translator'
               } : {})

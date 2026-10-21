@@ -180,43 +180,106 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
   const handleTestServer = async (server: { providerType: ProviderType; apiKey: string; baseURL: string; model: string }, id: string) => {
     setTestingId(id);
     try {
-      const res = await fetch('/api/keys/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: server.providerType,
-          apiKey: server.apiKey,
-          baseURL: server.baseURL,
-          model: server.model,
-        }),
-      });
+      let isSuccess = false;
+      let latencyMs = 0;
+      let errorMsg: string | undefined = undefined;
 
-      let data: any = null;
-      const rawText = await res.text();
+      // Clean base url
+      let effectiveBaseUrl = (server.baseURL || '').trim();
+      if (!effectiveBaseUrl) {
+        if (server.providerType === 'openrouter') effectiveBaseUrl = 'https://openrouter.ai/api/v1';
+        else if (server.providerType === 'deepseek') effectiveBaseUrl = 'https://api.deepseek.com/v1';
+        else if (server.providerType === 'openai') effectiveBaseUrl = 'https://api.openai.com/v1';
+      }
+
+      // Try 1: Call backend proxy
+      let backendHtmlOrFailed = false;
       try {
-        data = JSON.parse(rawText);
+        const res = await fetch('/api/keys/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: server.providerType,
+            apiKey: server.apiKey,
+            baseURL: effectiveBaseUrl,
+            model: server.model,
+          }),
+        });
+
+        const rawText = await res.text();
+        const trimmed = rawText.trim();
+        if (trimmed.startsWith('<') || trimmed.toLowerCase().includes('<!doctype') || trimmed.toLowerCase().includes('<html')) {
+          backendHtmlOrFailed = true;
+        } else {
+          const data = JSON.parse(rawText);
+          isSuccess = res.ok && Boolean(data?.success);
+          latencyMs = data?.latencyMs || 0;
+          errorMsg = data?.error;
+        }
       } catch {
-        const isHtml = rawText.trim().startsWith('<') || rawText.toLowerCase().includes('<!doctype');
-        throw new Error(
-          isHtml
-            ? `سرور ارائه‌دهنده پاسخ وب HTML فرستاد (کد وضعیت ${res.status}). لطفاً آدرس سرور (Base URL) را بازبینی فرمایید (باید به /v1 ختم شود).`
-            : `پاسخ سرور قالب معتبر JSON نداشت (کد ${res.status}).`
-        );
+        backendHtmlOrFailed = true;
+      }
+
+      // Try 2: If backend returned HTML or wasn't reachable (e.g. preview environment routing),
+      // and this is a custom/openrouter/openai server, test directly from browser (CORS supported)!
+      if (backendHtmlOrFailed && server.providerType !== 'gemini' && server.apiKey) {
+        try {
+          let cleanUrl = effectiveBaseUrl.replace(/\/+$/, '');
+          if (cleanUrl === 'https://openrouter.ai' || cleanUrl === 'http://openrouter.ai') {
+            cleanUrl = 'https://openrouter.ai/api/v1';
+          }
+          const targetUrl = `${cleanUrl}/chat/completions`;
+          const t0 = Date.now();
+          const directRes = await fetch(targetUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${server.apiKey.trim()}`,
+              ...(server.providerType === 'openrouter' || cleanUrl.includes('openrouter.ai') ? {
+                'HTTP-Referer': window.location.origin,
+                'X-Title': 'Persian Book Translator'
+              } : {})
+            },
+            body: JSON.stringify({
+              model: server.model,
+              messages: [{ role: 'user', content: 'Reply with exact single word: PONG_OK' }],
+              max_tokens: 10,
+            }),
+          });
+
+          latencyMs = Date.now() - t0;
+          const directText = await directRes.text();
+          let directData: any = {};
+          try { directData = JSON.parse(directText); } catch {}
+
+          if (directRes.ok) {
+            isSuccess = true;
+            errorMsg = undefined;
+          } else {
+            isSuccess = false;
+            errorMsg = directData?.error?.message || `خطای HTTP ${directRes.status}: ${directRes.statusText}`;
+          }
+        } catch (directErr: any) {
+          isSuccess = false;
+          errorMsg = directErr.message || 'خطا در برقراری ارتباط با سرور';
+        }
+      } else if (backendHtmlOrFailed && !isSuccess && !errorMsg) {
+        errorMsg = 'سرور موقتاً در حال راه‌اندازی است یا آدرس وارد شده معتبر نمی‌باشد.';
       }
 
       setTestResults(prev => ({
         ...prev,
         [id]: {
-          success: res.ok && Boolean(data?.success),
-          latencyMs: data?.latencyMs,
-          error: data?.error,
+          success: isSuccess,
+          latencyMs,
+          error: errorMsg,
         },
       }));
 
       // Update in server pool if it exists
-      if (serverPool.some(s => s.id === id)) {
+      if (serverPool.some(s => s.id === id) && isSuccess) {
         onUpdateServerPool(
-          serverPool.map(s => (s.id === id ? { ...s, lastLatencyMs: data?.latencyMs, lastTestedAt: Date.now() } : s))
+          serverPool.map(s => (s.id === id ? { ...s, lastLatencyMs: latencyMs, lastTestedAt: Date.now() } : s))
         );
       }
     } catch (err: any) {
