@@ -220,51 +220,108 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
         backendHtmlOrFailed = true;
       }
 
-      // Try 2: If backend returned HTML or wasn't reachable (e.g. preview environment routing),
-      // and this is a custom/openrouter/openai server, test directly from browser (CORS supported)!
-      if (backendHtmlOrFailed && server.providerType !== 'gemini' && server.apiKey) {
-        try {
-          let cleanUrl = effectiveBaseUrl.replace(/\/+$/, '');
-          if (cleanUrl === 'https://openrouter.ai' || cleanUrl === 'http://openrouter.ai') {
-            cleanUrl = 'https://openrouter.ai/api/v1';
-          }
-          const targetUrl = `${cleanUrl}/chat/completions`;
-          const t0 = Date.now();
-          const directRes = await fetch(targetUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${server.apiKey.trim()}`,
-              ...(server.providerType === 'openrouter' || cleanUrl.includes('openrouter.ai') ? {
-                'HTTP-Referer': window.location.origin,
-                'X-Title': 'Persian Book Translator'
-              } : {})
-            },
-            body: JSON.stringify({
-              model: server.model,
-              messages: [{ role: 'user', content: 'Reply with exact single word: PONG_OK' }],
-              max_tokens: 10,
-            }),
-          });
+      // Try 2: If backend returned HTML or wasn't reachable (e.g. Windows Server, static preview, or routing issue):
+      // Test directly from the browser (Google Gemini, OpenRouter, and OpenAI all support CORS)!
+      if (backendHtmlOrFailed && server.apiKey) {
+        if (server.providerType === 'gemini') {
+          // Direct Google Gemini API test from browser
+          try {
+            const cleanKey = server.apiKey.trim();
+            const candidateModels = [
+              server.model || 'gemini-3.8-flash',
+              'gemini-3.1-flash-lite',
+              'gemini-flash-latest'
+            ];
+            const t0 = Date.now();
+            let gOk = false;
+            let lastErr = '';
 
-          latencyMs = Date.now() - t0;
-          const directText = await directRes.text();
-          let directData: any = {};
-          try { directData = JSON.parse(directText); } catch {}
+            for (const cand of candidateModels) {
+              try {
+                const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cand}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+                const gRes = await fetch(targetUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: 'Reply PONG_OK' }] }]
+                  })
+                });
 
-          if (directRes.ok) {
-            isSuccess = true;
-            errorMsg = undefined;
-          } else {
+                const gText = await gRes.text();
+                let gData: any = {};
+                try { gData = JSON.parse(gText); } catch {}
+
+                if (gRes.ok) {
+                  gOk = true;
+                  latencyMs = Date.now() - t0;
+                  isSuccess = true;
+                  errorMsg = undefined;
+                  break;
+                } else {
+                  lastErr = gData?.error?.message || `کد وضعیت ${gRes.status}`;
+                  // If 503 high demand, loop and try next model
+                  if (gRes.status !== 503) {
+                    break;
+                  }
+                }
+              } catch (e: any) {
+                lastErr = e.message;
+              }
+            }
+
+            if (!gOk) {
+              isSuccess = false;
+              errorMsg = `خطای Gemini API: ${lastErr || 'عدم اتصال به سرور گوگل'}`;
+            }
+          } catch (gErr: any) {
             isSuccess = false;
-            errorMsg = directData?.error?.message || `خطای HTTP ${directRes.status}: ${directRes.statusText}`;
+            errorMsg = gErr.message || 'خطا در ارتباط با Gemini API';
           }
-        } catch (directErr: any) {
-          isSuccess = false;
-          errorMsg = directErr.message || 'خطا در برقراری ارتباط با سرور';
+        } else {
+          // Direct OpenRouter / OpenAI / DeepSeek / Custom proxy test from browser
+          try {
+            let cleanUrl = effectiveBaseUrl.replace(/\/+$/, '');
+            if (cleanUrl === 'https://openrouter.ai' || cleanUrl === 'http://openrouter.ai') {
+              cleanUrl = 'https://openrouter.ai/api/v1';
+            }
+            const targetUrl = `${cleanUrl}/chat/completions`;
+            const t0 = Date.now();
+            const directRes = await fetch(targetUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${server.apiKey.trim()}`,
+                ...(server.providerType === 'openrouter' || cleanUrl.includes('openrouter.ai') ? {
+                  'HTTP-Referer': window.location.origin,
+                  'X-Title': 'Persian Book Translator'
+                } : {})
+              },
+              body: JSON.stringify({
+                model: server.model,
+                messages: [{ role: 'user', content: 'Reply with exact single word: PONG_OK' }],
+                max_tokens: 10,
+              }),
+            });
+
+            latencyMs = Date.now() - t0;
+            const directText = await directRes.text();
+            let directData: any = {};
+            try { directData = JSON.parse(directText); } catch {}
+
+            if (directRes.ok) {
+              isSuccess = true;
+              errorMsg = undefined;
+            } else {
+              isSuccess = false;
+              errorMsg = directData?.error?.message || `خطای HTTP ${directRes.status}: ${directRes.statusText}`;
+            }
+          } catch (directErr: any) {
+            isSuccess = false;
+            errorMsg = directErr.message || 'خطا در برقراری ارتباط با سرور';
+          }
         }
       } else if (backendHtmlOrFailed && !isSuccess && !errorMsg) {
-        errorMsg = 'سرور موقتاً در حال راه‌اندازی است یا آدرس وارد شده معتبر نمی‌باشد.';
+        errorMsg = 'پاسخ سرور در دسترس نیست. لطفاً از فعال بودن کلید API اطمینان حاصل فرمایید.';
       }
 
       setTestResults(prev => ({

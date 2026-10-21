@@ -341,20 +341,144 @@ export default function App() {
       });
 
       let data: any = null;
-      const rawText = await res.text();
+      let isBackendHtml = false;
       try {
-        data = JSON.parse(rawText);
+        const rawText = await res.text();
+        const trimmed = rawText.trim();
+        if (trimmed.startsWith('<') || trimmed.toLowerCase().includes('<!doctype') || trimmed.toLowerCase().includes('<html')) {
+          isBackendHtml = true;
+        } else {
+          data = JSON.parse(rawText);
+        }
       } catch {
-        const isHtml = rawText.trim().startsWith('<') || rawText.toLowerCase().includes('<!doctype');
-        throw new Error(
-          isHtml
-            ? `سرور ارائه‌دهنده پاسخ وب HTML فرستاد (کد وضعیت ${res.status}). لطفاً آدرس سرور (Base URL) و کلید را در بخش «مدیریت و ویرایش سرورها» بازبینی نمایید.`
-            : `پاسخ دریافتی نامعتبر بود و ساختار JSON نداشت (کد ${res.status}).`
-        );
+        isBackendHtml = true;
       }
 
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'خطا در دریافت ترجمه از هوش مصنوعی');
+      // If backend returned HTML (e.g. running on Windows Server without Node backend or static host):
+      // Perform direct translation from browser using the active server's API key (CORS supported)!
+      if (isBackendHtml || !data?.success) {
+        const activeServer = serverPool.find(s => s.isEnabled) || serverPool[0];
+        if (activeServer && activeServer.apiKey) {
+          // Protect embedded images
+          const imagePlaceholderMap: Record<string, string> = {};
+          let imgCounter = 1;
+          const protectedEnglish = chunk.englishText.replace(/<img\s+[^>]*src=["'](data:[^"']+)["'][^>]*>/gi, (_match, dataUrl) => {
+            const placeholder = `[[BOOK_IMG_SAFE_${imgCounter}]]`;
+            imagePlaceholderMap[placeholder] = dataUrl;
+            imgCounter++;
+            return `<div class="book-illustration-wrap my-4 text-center">${placeholder}</div>`;
+          });
+
+          const restoreImagesClient = (htmlText: string) => {
+            let result = htmlText;
+            Object.entries(imagePlaceholderMap).forEach(([placeholder, dataUrl]) => {
+              const imgTag = `<img src="${dataUrl}" class="book-embedded-image rounded-xl shadow-md my-4 max-w-full mx-auto block border border-slate-300" alt="تصویر کتاب" />`;
+              result = result.replaceAll(placeholder, imgTag);
+            });
+            return result;
+          };
+
+          const systemPrompt = `شما یک مترجم فوق‌حرفه‌ای کتاب هستید.
+وظیفه شما ترجمه دقیق، روان، ادبی و بی‌نقص متن انگلیسی به زبان فارسی با لحن "${project.tone}" است.
+دستورالعمل‌ها:
+1. فقط و فقط کد HTML خروجی شامل تگ‌های <p>, <h2>, <blockquote>, <span> بازگردانید بدون توضیحات اضافی.
+2. به هیچ عنوان متغیرهای [[BOOK_IMG_SAFE_x]] را حذف یا ترجمه نکنید و دقیقاً در جای خود بگذارید.
+3. واژه‌نامه تخصصی زیر را با اولویت اعمال فرمایید:
+${project.glossary.map(g => `- ${g.en} => ${g.fa}`).join('\n')}`;
+
+          if (activeServer.providerType === 'gemini') {
+            const candidateModels = [activeServer.model || 'gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+            let gSuccess = false;
+            let lastGError = '';
+
+            for (const candModel of candidateModels) {
+              try {
+                const gUrl = `https://generativelanguage.googleapis.com/v1beta/models/${candModel}:generateContent?key=${encodeURIComponent(activeServer.apiKey.trim())}`;
+                const gRes = await fetch(gUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    contents: [{ parts: [{ text: `متن انگلیسی برای ترجمه:\n\n${protectedEnglish}` }] }],
+                    generationConfig: { temperature: 0.35 }
+                  })
+                });
+
+                const gText = await gRes.text();
+                const gJson = JSON.parse(gText);
+                if (gRes.ok) {
+                  let rawHtml = gJson.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                  rawHtml = rawHtml.replace(/^```html\s*/i, '').replace(/\s*```$/, '').trim();
+                  data = {
+                    success: true,
+                    translatedHtml: restoreImagesClient(rawHtml),
+                    keyUsed: `${activeServer.apiKey.slice(0, 4)}...${activeServer.apiKey.slice(-4)}`,
+                    model: candModel,
+                    serverUsed: activeServer.name,
+                    provider: 'Google Gemini',
+                  };
+                  gSuccess = true;
+                  break;
+                } else {
+                  lastGError = gJson.error?.message || `کد ${gRes.status}`;
+                  if (gRes.status !== 503) break;
+                }
+              } catch (e: any) {
+                lastGError = e.message;
+              }
+            }
+
+            if (!gSuccess) {
+              throw new Error(`خطای Gemini API: ${lastGError}`);
+            }
+          } else {
+            // OpenRouter / OpenAI / Custom
+            let cleanBase = (activeServer.baseURL || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
+            if (cleanBase === 'https://openrouter.ai' || cleanBase === 'http://openrouter.ai') cleanBase = 'https://openrouter.ai/api/v1';
+            const targetUrl = `${cleanBase}/chat/completions`;
+            const oRes = await fetch(targetUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${activeServer.apiKey.trim()}`,
+                ...(activeServer.providerType === 'openrouter' || cleanBase.includes('openrouter.ai') ? {
+                  'HTTP-Referer': window.location.origin,
+                  'X-Title': 'Persian Book Translator'
+                } : {})
+              },
+              body: JSON.stringify({
+                model: activeServer.model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: protectedEnglish }
+                ],
+                temperature: 0.35
+              })
+            });
+
+            const oText = await oRes.text();
+            const oJson = JSON.parse(oText);
+            if (!oRes.ok) {
+              throw new Error(oJson.error?.message || `خطای HTTP ${oRes.status}`);
+            }
+            let rawHtml = oJson.choices?.[0]?.message?.content || '';
+            rawHtml = rawHtml.replace(/^```html\s*/i, '').replace(/\s*```$/, '').trim();
+            data = {
+              success: true,
+              translatedHtml: restoreImagesClient(rawHtml),
+              keyUsed: `${activeServer.apiKey.slice(0, 4)}...${activeServer.apiKey.slice(-4)}`,
+              model: activeServer.model,
+              serverUsed: activeServer.name,
+              provider: activeServer.providerType,
+            };
+          }
+        } else {
+          throw new Error(
+            isBackendHtml
+              ? 'سرور بک‌اند پاسخ وب HTML داد. لطفاً مطمئن شوید کلید API اختصاصی خود را در بخش «ویرایش API» وارد نموده‌اید.'
+              : (data?.error || 'خطا در دریافت ترجمه از هوش مصنوعی')
+          );
+        }
       }
 
       setBooks(prev =>
