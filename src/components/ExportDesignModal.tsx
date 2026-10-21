@@ -903,14 +903,14 @@ export const ExportDesignModal: React.FC<ExportDesignModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* HTML / Web Word button */}
+            {/* Word .doc with full design */}
             <button
               onClick={handleDownloadHtml}
               className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1.5"
-              title="خروجی وب قابل باز شدن در تمام نسخه‌های ورد"
+              title="خروجی Word با پشتیبانی کامل از رنگ پس‌زمینه، کادرها و تصاویر (فرمت استاندارد .doc)"
             >
-              <FileText className="w-3.5 h-3.5 text-blue-400" />
-              <span>فایل متنی HTML</span>
+              <FileText className="w-3.5 h-3.5 text-amber-400" />
+              <span>فایل Word با طراحی کامل (.doc)</span>
             </button>
 
             {/* Word DOCX Button with Vazirmatn Medium */}
