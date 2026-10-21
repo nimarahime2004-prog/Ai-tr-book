@@ -192,8 +192,8 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
         else if (server.providerType === 'openai') effectiveBaseUrl = 'https://api.openai.com/v1';
       }
 
-      // Try 1: Call backend proxy
-      let backendHtmlOrFailed = false;
+      // Ping and test API key strictly through the backend server (Node.js proxy)
+      // This guarantees all requests originate from the server IP, so users can connect from any location/device without VPN.
       try {
         const res = await fetch('/api/keys/test', {
           method: 'POST',
@@ -209,119 +209,22 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
         const rawText = await res.text();
         const trimmed = rawText.trim();
         if (trimmed.startsWith('<') || trimmed.toLowerCase().includes('<!doctype') || trimmed.toLowerCase().includes('<html')) {
-          backendHtmlOrFailed = true;
+          isSuccess = false;
+          errorMsg = `پاسخ وب HTML از سرور دریافت شد (کد ${res.status}). لطفاً مطمئن شوید سرویس Node.js روی سرور فعال است و مسیر /api توسط IIS مسدود نشده است.`;
         } else {
-          const data = JSON.parse(rawText);
-          isSuccess = res.ok && Boolean(data?.success);
-          latencyMs = data?.latencyMs || 0;
-          errorMsg = data?.error;
-        }
-      } catch {
-        backendHtmlOrFailed = true;
-      }
-
-      // Try 2: If backend returned HTML or wasn't reachable (e.g. Windows Server, static preview, or routing issue):
-      // Test directly from the browser (Google Gemini, OpenRouter, and OpenAI all support CORS)!
-      if (backendHtmlOrFailed && server.apiKey) {
-        if (server.providerType === 'gemini') {
-          // Direct Google Gemini API test from browser
           try {
-            const cleanKey = server.apiKey.trim();
-            const candidateModels = [
-              server.model || 'gemini-3.8-flash',
-              'gemini-3.1-flash-lite',
-              'gemini-flash-latest'
-            ];
-            const t0 = Date.now();
-            let gOk = false;
-            let lastErr = '';
-
-            for (const cand of candidateModels) {
-              try {
-                const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cand}:generateContent?key=${encodeURIComponent(cleanKey)}`;
-                const gRes = await fetch(targetUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [{ parts: [{ text: 'Reply PONG_OK' }] }]
-                  })
-                });
-
-                const gText = await gRes.text();
-                let gData: any = {};
-                try { gData = JSON.parse(gText); } catch {}
-
-                if (gRes.ok) {
-                  gOk = true;
-                  latencyMs = Date.now() - t0;
-                  isSuccess = true;
-                  errorMsg = undefined;
-                  break;
-                } else {
-                  lastErr = gData?.error?.message || `کد وضعیت ${gRes.status}`;
-                  // If 503 high demand, loop and try next model
-                  if (gRes.status !== 503) {
-                    break;
-                  }
-                }
-              } catch (e: any) {
-                lastErr = e.message;
-              }
-            }
-
-            if (!gOk) {
-              isSuccess = false;
-              errorMsg = `خطای Gemini API: ${lastErr || 'عدم اتصال به سرور گوگل'}`;
-            }
-          } catch (gErr: any) {
+            const data = JSON.parse(rawText);
+            isSuccess = res.ok && Boolean(data?.success);
+            latencyMs = data?.latencyMs || 0;
+            errorMsg = data?.error;
+          } catch {
             isSuccess = false;
-            errorMsg = gErr.message || 'خطا در ارتباط با Gemini API';
-          }
-        } else {
-          // Direct OpenRouter / OpenAI / DeepSeek / Custom proxy test from browser
-          try {
-            let cleanUrl = effectiveBaseUrl.replace(/\/+$/, '');
-            if (cleanUrl === 'https://openrouter.ai' || cleanUrl === 'http://openrouter.ai') {
-              cleanUrl = 'https://openrouter.ai/api/v1';
-            }
-            const targetUrl = `${cleanUrl}/chat/completions`;
-            const t0 = Date.now();
-            const directRes = await fetch(targetUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${server.apiKey.trim()}`,
-                ...(server.providerType === 'openrouter' || cleanUrl.includes('openrouter.ai') ? {
-                  'HTTP-Referer': window.location.origin,
-                  'X-Title': 'Persian Book Translator'
-                } : {})
-              },
-              body: JSON.stringify({
-                model: server.model,
-                messages: [{ role: 'user', content: 'Reply with exact single word: PONG_OK' }],
-                max_tokens: 10,
-              }),
-            });
-
-            latencyMs = Date.now() - t0;
-            const directText = await directRes.text();
-            let directData: any = {};
-            try { directData = JSON.parse(directText); } catch {}
-
-            if (directRes.ok) {
-              isSuccess = true;
-              errorMsg = undefined;
-            } else {
-              isSuccess = false;
-              errorMsg = directData?.error?.message || `خطای HTTP ${directRes.status}: ${directRes.statusText}`;
-            }
-          } catch (directErr: any) {
-            isSuccess = false;
-            errorMsg = directErr.message || 'خطا در برقراری ارتباط با سرور';
+            errorMsg = `پاسخ نامعتبر از سرور: ${trimmed.slice(0, 150)}`;
           }
         }
-      } else if (backendHtmlOrFailed && !isSuccess && !errorMsg) {
-        errorMsg = 'پاسخ سرور در دسترس نیست. لطفاً از فعال بودن کلید API اطمینان حاصل فرمایید.';
+      } catch (networkErr: any) {
+        isSuccess = false;
+        errorMsg = networkErr?.message || 'عدم دسترسی به سرور بک‌اند برنامه. لطفاً وضعیت سرویس Node.js را بررسی نمایید.';
       }
 
       setTestResults(prev => ({
@@ -456,6 +359,19 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
               </strong>
               <p className="text-[11px] text-emerald-400/90 leading-relaxed">
                 تمام سرورهای موجود در این لیست دقیقاً همان پرامپت سیستمی جامع، واژه‌نامه تخصصی کتاب، لحن انتخابی و کدهای رنگی Word (<span className="font-mono text-emerald-300">#1a365d, #2b6cb0, #9b2c2c</span>) را دریافت می‌کنند. حتی با سوئیچ میان ارائه‌دهندگان، لحن و پیوستگی متن هیچ‌گونه تغییری نخواهد کرد.
+              </p>
+            </div>
+          </div>
+
+          {/* Server-Side Proxy / IP Independence Guarantee */}
+          <div className="bg-blue-500/10 border border-blue-500/25 rounded-2xl p-3.5 flex items-start gap-3 text-xs text-blue-300">
+            <Globe className="w-5 h-5 shrink-0 text-blue-400 mt-0.5" />
+            <div className="space-y-0.5">
+              <strong className="block font-bold text-blue-200">
+                ارتباط ۱۰۰٪ از طریق سرور اختصاصی برنامه (بدون وابستگی به IP کاربر):
+              </strong>
+              <p className="text-[11px] text-blue-300/90 leading-relaxed">
+                کلیه تست‌های پینگ، اعتبارسنجی کلیدها و ترجمه‌ها منحصراً توسط بک‌اند سرور برنامه اجرا می‌شوند (نه از مرورگر کاربر). بنابراین کاربران فارغ از لوکیشن یا محدودیت‌های IP و بدون نیاز به روشن بودن VPN روی دستگاه خود، می‌توانند به آسانی از سیستم استفاده کنند.
               </p>
             </div>
           </div>

@@ -21,6 +21,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Enable CORS so client browsers connecting from any IP or origin can access /api/*
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -225,6 +236,13 @@ function normalizeBaseUrl(provider: string, baseURL?: string): string {
     return 'https://api.openai.com/v1';
   }
 
+  // Strip trailing /chat/completions or /completions if the user pasted the full endpoint
+  if (url.endsWith('/chat/completions')) {
+    url = url.slice(0, -'/chat/completions'.length).replace(/\/+$/, '');
+  } else if (url.endsWith('/completions')) {
+    url = url.slice(0, -'/completions'.length).replace(/\/+$/, '');
+  }
+
   // Auto-correct common missing /v1 suffixes
   if (provider === 'openrouter' || url.includes('openrouter.ai')) {
     if (url === 'https://openrouter.ai' || url === 'http://openrouter.ai') {
@@ -266,14 +284,14 @@ async function parseResponseSafely(response: Response): Promise<{ isJson: boolea
         return {
           isJson: false,
           data: null,
-          errorMessage: 'خطای ۴۰۴: مسیر یا آدرس سرور (Base URL) نامعتبر است و سرور صفحه وب ۴۰۴ ارسال کرد. لطفاً آدرس را با /v1 بررسی و ویرایش نمایید (مثلاً: https://openrouter.ai/api/v1).',
+          errorMessage: 'خطای ۴۰۴: آدرس سرور (Base URL) نامعتبر است و سرور ارائه‌دهنده صفحه ۴۰۴ وب ارسال کرد. لطفاً آدرس را در بخش ویرایش بررسی نمایید (مثلاً https://openrouter.ai/api/v1).',
         };
       }
       if (response.status === 502 || response.status === 504 || response.status === 520 || response.status === 524) {
         return {
           isJson: false,
           data: null,
-          errorMessage: `خطای سرور یا کلودفلر (کد ${response.status}): ارتباط با سرور هوش مصنوعی به دلیل قطعی موقت یا فیلترینگ با پاسخ وب متوقف شد.`,
+          errorMessage: `خطای سرور ارائه‌دهنده (کد ${response.status}): ارتباط با سرور هوش مصنوعی به دلیل اختلال موقت ارائه‌دهنده یا کلودفلر متوقف شد.`,
         };
       }
       if (response.status === 401 || response.status === 403) {
@@ -286,7 +304,7 @@ async function parseResponseSafely(response: Response): Promise<{ isJson: boolea
       return {
         isJson: false,
         data: null,
-        errorMessage: `سرور به جای خروجی داده JSON، یک صفحه وب HTML با کد وضعیت ${response.status} برگرداند. لطفاً در بخش ویرایش API آدرس سرور را تصحیح فرمایید.`,
+        errorMessage: `سرور ارائه‌دهنده به جای داده JSON، یک صفحه وب HTML با کد وضعیت ${response.status} برگرداند. احتمالاً آدرس Base URL یا مدل انتخاب شده اشتباه است.`,
       };
     }
 
@@ -298,14 +316,14 @@ async function parseResponseSafely(response: Response): Promise<{ isJson: boolea
   }
 }
 
-// Test Connection for a specific key / provider
+// Test Connection for a specific key / provider (ALWAYS EXECUTED ON THE BACKEND SERVER)
 app.post('/api/keys/test', async (req, res) => {
   const { provider, apiKey, baseURL, model, masked } = req.body;
 
   // If testing a non-Gemini provider (OpenAI, OpenRouter, DeepSeek, GLM, Custom proxy)
   if (provider && provider !== 'gemini') {
     if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 4) {
-      return res.status(400).json({ success: false, error: 'لطفاً کلید API معتبر برای این ارائه‌دهنده را وارد کنید.' });
+      return res.status(400).json({ success: false, error: 'لطفاً کلید API معتبر برای این ارائه‌دهنده را وارد کنید.', testedByServerIp: true });
     }
 
     const cleanBaseUrl = normalizeBaseUrl(provider, baseURL);
@@ -314,13 +332,18 @@ app.post('/api/keys/test', async (req, res) => {
     const t0 = Date.now();
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 22000); // 22s timeout
+
       const response = await fetch(targetUrl, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey.trim()}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PersianBookTranslator/1.0',
           ...(provider === 'openrouter' || cleanBaseUrl.includes('openrouter.ai') ? {
-            'HTTP-Referer': 'https://aistudio.google.com',
+            'HTTP-Referer': 'https://openrouter.ai',
             'X-Title': 'Persian Book Translator'
           } : {})
         },
@@ -330,6 +353,7 @@ app.post('/api/keys/test', async (req, res) => {
           max_tokens: 10,
         }),
       });
+      clearTimeout(timeoutId);
 
       const latencyMs = Date.now() - t0;
       const parseResult = await parseResponseSafely(response);
@@ -339,6 +363,7 @@ app.post('/api/keys/test', async (req, res) => {
           success: false,
           latencyMs,
           error: parseResult.errorMessage || 'پاسخ دریافتی نامعتبر بود و قالب JSON نداشت.',
+          testedByServerIp: true,
         });
       }
 
@@ -348,6 +373,7 @@ app.post('/api/keys/test', async (req, res) => {
           success: false,
           latencyMs,
           error: data?.error?.message || `خطای سرور HTTP ${response.status}: ${response.statusText}`,
+          testedByServerIp: true,
         });
       }
 
@@ -358,13 +384,18 @@ app.post('/api/keys/test', async (req, res) => {
         masked: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
         response: answer,
         modelUsed: testModel,
+        testedByServerIp: true,
       });
     } catch (err: any) {
       const latencyMs = Date.now() - t0;
+      const isTimeout = err?.name === 'AbortError' || err?.message?.includes('aborted');
       return res.json({
         success: false,
         latencyMs,
-        error: err?.message || 'خطا در ارتباط با سرور ارائه‌دهنده',
+        error: isTimeout
+          ? 'پایان مهلت زمان اتصال (Timeout پس از ۲۲ ثانیه). وضعیت اینترنت یا فیلترینگ سرور را بررسی نمایید.'
+          : (err?.message || 'خطا در ارتباط با سرور ارائه‌دهنده از طریق سرور'),
+        testedByServerIp: true,
       });
     }
   }
@@ -430,14 +461,16 @@ app.post('/api/keys/test', async (req, res) => {
       masked: `${testKey.slice(0, 4)}...${testKey.slice(-4)}`,
       response: successfulResult.text?.trim() || 'PONG_OK',
       modelUsed: modelThatWorked,
+      testedByServerIp: true,
     });
   }
 
   return res.json({
     success: false,
     latencyMs,
-    error: lastGeminiError?.message || 'خطا در برقراری ارتباط با مدل هوش مصنوعی',
+    error: lastGeminiError?.message || 'خطا در برقراری ارتباط با مدل هوش مصنوعی از طریق سرور',
     masked: `${testKey.slice(0, 4)}...${testKey.slice(-4)}`,
+    testedByServerIp: true,
   });
 });
 
@@ -554,6 +587,7 @@ ${cleanEnglishText}`;
   // 1. MULTI-SERVER FAILOVER POOL: If user has configured an active pool of servers/endpoints
   if (Array.isArray(serverPool) && serverPool.length > 0) {
     const activeServers = serverPool.filter((s: any) => s.isEnabled !== false);
+    const failedServerDetails: string[] = [];
 
     for (let sIdx = 0; sIdx < activeServers.length; sIdx++) {
       const server = activeServers[sIdx];
@@ -615,7 +649,7 @@ ${cleanEnglishText}`;
           const cleanBaseUrl = normalizeBaseUrl(server.providerType, server.baseURL);
           const targetUrl = `${cleanBaseUrl.replace(/\/+$/, '')}/chat/completions`;
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s failover timeout
+          const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s failover timeout
 
           const response = await fetch(targetUrl, {
             method: 'POST',
@@ -623,8 +657,9 @@ ${cleanEnglishText}`;
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${server.apiKey.trim()}`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PersianBookTranslator/1.0',
               ...(server.providerType === 'openrouter' || cleanBaseUrl.includes('openrouter.ai') ? {
-                'HTTP-Referer': 'https://aistudio.google.com',
+                'HTTP-Referer': 'https://openrouter.ai',
                 'X-Title': 'Persian Book Translator'
               } : {})
             },
@@ -647,7 +682,7 @@ ${cleanEnglishText}`;
 
           const data = parseResult.data;
           if (!response.ok) {
-            throw new Error(data?.error?.message || `خطای HTTP ${response.status}`);
+            throw new Error(data?.error?.message || `خطای HTTP ${response.status}: ${response.statusText}`);
           }
 
           let cleanHtml = (data.choices?.[0]?.message?.content || '').trim();
@@ -671,11 +706,23 @@ ${cleanEnglishText}`;
           });
         }
       } catch (err: any) {
-        console.warn(`[Auto-Switching Engine] Server "${server.name}" failed: ${err.message}. Automatically switching to next server...`);
+        const isTimeout = err?.name === 'AbortError' || err?.message?.includes('aborted');
+        const reason = isTimeout ? 'پایان مهلت زمانی ۳۵ ثانیه (Timeout)' : (err.message || 'خطای اتصال');
+        console.warn(`[Auto-Switching Engine] Server "${server.name}" failed: ${reason}.`);
+        failedServerDetails.push(`سرور «${server.name}» (${server.model}): ${reason}`);
         // Continue to next server in activeServers!
       }
     }
-    console.warn('[Auto-Switching Engine] All custom servers in pool failed or timed out. Falling back to default Gemini system pool...');
+    console.warn('[Auto-Switching Engine] Custom servers completed. Failed list:', failedServerDetails);
+    
+    // If all custom servers failed and no system Gemini key is present, report exact errors immediately
+    const hasDefaultGemini = Boolean(process.env.GEMINI_API_KEY) || keyPool.length > 0;
+    if (!hasDefaultGemini && failedServerDetails.length > 0) {
+      return res.status(502).json({
+        success: false,
+        error: `اتصال به سرورهای تعریف‌شده ناموفق بود:\n` + failedServerDetails.join('\n') + `\nلطفاً در بخش ویرایش API کلید یا مدل را بررسی فرمایید.`,
+      });
+    }
   }
 
   // 2. SINGLE NON-GEMINI PROVIDER FALLBACK
@@ -688,13 +735,17 @@ ${cleanEnglishText}`;
     const targetUrl = `${cleanBaseUrl.replace(/\/+$/, '')}/chat/completions`;
     try {
       await enforceRateLimit();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
       const response = await fetch(targetUrl, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey.trim()}`,
-          ...(provider === 'openrouter' ? {
-            'HTTP-Referer': 'https://aistudio.google.com',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PersianBookTranslator/1.0',
+          ...(provider === 'openrouter' || cleanBaseUrl.includes('openrouter.ai') ? {
+            'HTTP-Referer': 'https://openrouter.ai',
             'X-Title': 'Persian Book Translator'
           } : {})
         },
@@ -708,6 +759,7 @@ ${cleanEnglishText}`;
           top_p: 0.95
         })
       });
+      clearTimeout(timeoutId);
 
       const parseResult = await parseResponseSafely(response);
       if (!parseResult.isJson) {
