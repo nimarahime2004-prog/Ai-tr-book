@@ -10,7 +10,8 @@ import {
   PlusCircle,
   HelpCircle,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Palette
 } from 'lucide-react';
 import { BookProject, ServerStatusResponse } from '../types.ts';
 import { downloadDocx, downloadWordHtml, downloadStyledHtml, downloadPlainText, exportProjectJson } from '../utils/exporter.ts';
@@ -28,6 +29,7 @@ interface NavbarProps {
   booksCount: number;
   onOpenProvidersModal: () => void;
   activeProviderName: string;
+  onOpenDesignModal: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   booksCount,
   onOpenProvidersModal,
   activeProviderName,
+  onOpenDesignModal,
 }) => {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSamplesMenu, setShowSamplesMenu] = useState(false);
@@ -154,6 +157,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden sm:inline">آپلود کتاب</span>
           </button>
 
+          {/* Book Design & PDF Studio Button */}
+          <button
+            onClick={onOpenDesignModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-amber-500/20 to-indigo-500/20 hover:from-amber-500/30 hover:to-indigo-500/30 text-amber-300 border border-amber-500/40 transition shadow-sm"
+            title="تنظیم هدر، فوتر، تم پس‌زمینه و خروجی شیک PDF و Word"
+          >
+            <Palette className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">دیزاین و چاپ PDF</span>
+          </button>
+
           {/* Export Menu */}
           <div className="relative">
             <button
@@ -177,6 +190,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="px-3 py-1.5 text-xs font-semibold text-slate-400 border-b border-slate-700">
                   فرمت‌های استاندارد خروجی:
                 </div>
+
+                {/* Design Studio Trigger */}
+                <button
+                  onClick={() => {
+                    onOpenDesignModal();
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-right px-4 py-2.5 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 flex items-center gap-2 border-b border-slate-700 transition"
+                >
+                  <Palette className="w-4 h-4 text-amber-400 shrink-0" />
+                  <div>
+                    <div className="font-bold text-white">استودیوی دیزاین و چاپ کتاب</div>
+                    <div className="text-[10px] text-amber-300/80">تنظیم هدر، آدرس سایت، تم و فونت</div>
+                  </div>
+                </button>
 
                 {/* Word DOCX */}
                 <button
@@ -212,15 +240,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {/* PDF Print */}
                 <button
                   onClick={() => {
-                    onPrintPdf();
+                    if (onOpenDesignModal) {
+                      onOpenDesignModal();
+                    } else {
+                      onPrintPdf();
+                    }
                     setShowExportMenu(false);
                   }}
                   className="w-full text-right px-4 py-2 text-xs hover:bg-slate-700 text-slate-200 flex items-center gap-2 transition"
                 >
                   <Printer className="w-4 h-4 text-emerald-400" />
                   <div>
-                    <div className="font-semibold text-white">خروجی PDF آماده چاپ</div>
-                    <div className="text-[10px] text-slate-400">کیفیت برداری با قطع کتاب و شماره صفحه</div>
+                    <div className="font-semibold text-white">خروجی PDF آماده چاپ (با دیزاین)</div>
+                    <div className="text-[10px] text-slate-400">تنظیم هدر، فوتر، نام سایت و چاپ مستقیم</div>
                   </div>
                 </button>
 

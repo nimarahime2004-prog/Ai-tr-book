@@ -76,6 +76,38 @@ export interface BookChunk {
   translatedAt?: number;
 }
 
+export type BookThemeId =
+  | 'spiritual'          // معنوی و اشراقی (تذهیب اسلیمی زرین و فیروزه‌ای)
+  | 'spiritual_ancient'  // معنوی کهن (پاپیروس عتیق و خط کهن)
+  | 'spiritual_azure'    // معنوی آرامش و نیایش (لاجوردی و ماندالای آسمانی)
+  | 'novel'              // رمان کلاسیک ادبی (عاجی و زرشکی اشرافی)
+  | 'luxury_gold'        // سلطنتی طلاکوب و فاخر (سرمه‌ای شب و طلای اعلا)
+  | 'academic'           // دانشگاهی و پژوهشی (نیلی مینیمال و دقیق)
+  | 'sage_nature'        // روانشناسی و رشد فردی (سبز مریم‌گلی و آرامش‌بخش)
+  | 'minimal_clean';     // سفید چاپی خالص و اقتصادی
+
+export type BackgroundPatternId = 'none' | 'arabesque' | 'geometry' | 'parchment';
+export type BorderStyleId = 'ornate_spiritual' | 'double_classic' | 'thin_modern' | 'none';
+
+export interface BookDesignConfig {
+  themeId: BookThemeId;
+  headerText: string;
+  footerText: string;
+  showHeader: boolean;
+  showFooter: boolean;
+  websiteUrl?: string; // e.g. "www.yoursite.com"
+  brandName?: string;  // e.g. "انتشارات آرمان"
+  showPageNumbers: boolean;
+  showCoverPage: boolean;
+  fontSize: 'small' | 'medium' | 'large';
+  lineSpacing: 'compact' | 'normal' | 'relaxed';
+  fontFamily: 'Vazirmatn Medium' | 'Vazirmatn' | 'B Nazanin' | 'Tahoma' | 'IRANSans';
+  borderStyle: BorderStyleId;
+  backgroundPattern: BackgroundPatternId;
+  watermarkText?: string;
+  pageMargin?: 'compact' | 'normal' | 'generous';
+}
+
 export interface BookProject {
   id: string;
   title: string;
@@ -91,6 +123,7 @@ export interface BookProject {
   createdAt: number;
   updatedAt: number;
   rollingSummary?: string;
+  designConfig?: BookDesignConfig;
 }
 
 export interface ServerKeyStatus {

@@ -14,6 +14,7 @@ import { NewBookModal } from './components/NewBookModal.tsx';
 import { TokenEstimatorModal } from './components/TokenEstimatorModal.tsx';
 import { ProviderManagerModal } from './components/ProviderManagerModal.tsx';
 import { BooksLibraryModal } from './components/BooksLibraryModal.tsx';
+import { ExportDesignModal } from './components/ExportDesignModal.tsx';
 import { PrintDocument } from './components/PrintDocument.tsx';
 import { BookProject, BookChunk, ServerStatusResponse, GlossaryItem, AIProviderConfig, APIServerEndpoint } from './types.ts';
 import { SAMPLE_BOOKS, SampleBook } from './utils/sampleBooks.ts';
@@ -155,6 +156,7 @@ export default function App() {
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [isProvidersModalOpen, setIsProvidersModalOpen] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
+  const [isDesignModalOpen, setIsDesignModalOpen] = useState(false);
 
   // Batch Translation Engine
   const [isBatchTranslating, setIsBatchTranslating] = useState(false);
@@ -485,6 +487,7 @@ export default function App() {
           booksCount={books.length}
           onOpenProvidersModal={() => setIsProvidersModalOpen(true)}
           activeProviderName={serverPool.find(s => s.isEnabled)?.name.split(' (')[0] || 'جمینای'}
+          onOpenDesignModal={() => setIsDesignModalOpen(true)}
         />
 
         {/* Project Header Bar */}
@@ -493,6 +496,7 @@ export default function App() {
           onUpdateProject={handleUpdateProject}
           onOpenGlossaryModal={() => setIsGlossaryModalOpen(true)}
           onOpenTokenModal={() => setIsTokenModalOpen(true)}
+          onOpenExportModal={() => setIsDesignModalOpen(true)}
         />
 
         {/* Studio Body: Sidebar + Workspace */}
@@ -579,6 +583,14 @@ export default function App() {
         onOpenNewBookModal={() => setIsNewBookModalOpen(true)}
       />
 
+      {/* Book Design, Spiritual Themes, Header/Footer & Export Studio Modal */}
+      <ExportDesignModal
+        isOpen={isDesignModalOpen}
+        onClose={() => setIsDesignModalOpen(false)}
+        project={project}
+        onUpdateDesign={(designConfig) => handleUpdateProject({ designConfig })}
+        onPrintPdf={handlePrintPdf}
+      />
     </div>
   );
 }

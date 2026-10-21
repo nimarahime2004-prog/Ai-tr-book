@@ -7,7 +7,7 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, Packer, BorderStyle } from 'docx';
+import { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, Packer, BorderStyle, Header, Footer, PageNumber } from 'docx';
 
 dotenv.config();
 
@@ -754,9 +754,20 @@ ${sampleText.slice(0, 4000)}`;
   }
 });
 
+// Helper to generate proper multi-script font definition for Word (ensuring Persian text gets Vazirmatn Medium)
+function createFontDef(fontName: string = 'Vazirmatn Medium') {
+  return {
+    name: fontName,
+    cs: fontName,
+    ascii: fontName,
+    hAnsi: fontName,
+  };
+}
+
 // Helper to preserve color-coded glossary terms (#9b2c2c) and styling in Word TextRuns
-function parseHtmlToTextRuns(html: string): TextRun[] {
+function parseHtmlToTextRuns(html: string, fontName: string = 'Vazirmatn Medium'): TextRun[] {
   const runs: TextRun[] = [];
+  const fontDef = createFontDef(fontName);
   const regex = /<span style="[^"]*#9b2c2c[^"]*"[^>]*>([\s\S]*?)<\/span>|<b[^>]*>([\s\S]*?)<\/b>|<strong[^>]*>([\s\S]*?)<\/strong>|<i[^>]*>([\s\S]*?)<\/i>|<em[^>]*>([\s\S]*?)<\/em>|([^<]+)/gi;
   let match;
   while ((match = regex.exec(html)) !== null) {
@@ -765,7 +776,7 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
       runs.push(
         new TextRun({
           text: match[1].replace(/<[^>]+>/g, ''),
-          font: 'Vazirmatn',
+          font: fontDef,
           size: 24,
           bold: true,
           color: '9B2C2C',
@@ -777,7 +788,7 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
       runs.push(
         new TextRun({
           text: (match[2] || match[3]).replace(/<[^>]+>/g, ''),
-          font: 'Vazirmatn',
+          font: fontDef,
           size: 24,
           bold: true,
           color: '2D3748',
@@ -789,7 +800,7 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
       runs.push(
         new TextRun({
           text: (match[4] || match[5]).replace(/<[^>]+>/g, ''),
-          font: 'Vazirmatn',
+          font: fontDef,
           size: 24,
           italics: true,
           color: '4A5568',
@@ -800,7 +811,7 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
       runs.push(
         new TextRun({
           text: match[6],
-          font: 'Vazirmatn',
+          font: fontDef,
           size: 24,
           color: '2D3748',
           rightToLeft: true,
@@ -813,7 +824,7 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
     runs.push(
       new TextRun({
         text: html.replace(/<[^>]+>/g, '').trim(),
-        font: 'Vazirmatn',
+        font: fontDef,
         size: 24,
         color: '2D3748',
         rightToLeft: true,
@@ -827,7 +838,18 @@ function parseHtmlToTextRuns(html: string): TextRun[] {
 // Generate DOCX export from translated sections
 app.post('/api/export/docx', async (req, res) => {
   try {
-    const { title, author, translator, chapters } = req.body;
+    const { title, author, translator, chapters, designConfig } = req.body;
+    const fontFamily = designConfig?.fontFamily || 'Vazirmatn Medium';
+    const fontDef = createFontDef(fontFamily);
+
+    // Only include header if showHeader is explicitly true AND text is non-empty
+    const showHeader = designConfig?.showHeader === true && Boolean(designConfig?.headerText?.trim());
+    const headerText = showHeader ? (designConfig?.headerText?.trim() || '') : '';
+
+    // Only include footer if showFooter is true OR showPageNumbers is true
+    const showFooter = designConfig?.showFooter === true && Boolean(designConfig?.footerText?.trim());
+    const footerText = showFooter ? (designConfig?.footerText?.trim() || '') : '';
+    const showPageNumbers = designConfig?.showPageNumbers !== false;
 
     const docChildren: Paragraph[] = [];
 
@@ -840,7 +862,7 @@ app.post('/api/export/docx', async (req, res) => {
         children: [
           new TextRun({
             text: title || 'کتاب ترجمه شده',
-            font: 'Vazirmatn',
+            font: fontDef,
             size: 48, // 24pt
             bold: true,
             color: '1A365D',
@@ -859,7 +881,7 @@ app.post('/api/export/docx', async (req, res) => {
           children: [
             new TextRun({
               text: `نویسنده: ${author}`,
-              font: 'Vazirmatn',
+              font: fontDef,
               size: 26,
               color: '4A5568',
               rightToLeft: true,
@@ -878,7 +900,7 @@ app.post('/api/export/docx', async (req, res) => {
           children: [
             new TextRun({
               text: `ترجمه و ویرایش: ${translator}`,
-              font: 'Vazirmatn',
+              font: fontDef,
               size: 24,
               italics: true,
               color: '718096',
@@ -914,7 +936,7 @@ app.post('/api/export/docx', async (req, res) => {
               children: [
                 new TextRun({
                   text: ch.title,
-                  font: 'Vazirmatn',
+                  font: fontDef,
                   size: 36, // 18pt
                   bold: true,
                   color: '1A365D',
@@ -949,7 +971,7 @@ app.post('/api/export/docx', async (req, res) => {
                 children: [
                   new TextRun({
                     text: plainText,
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 36,
                     bold: true,
                     color: '1A365D',
@@ -968,7 +990,7 @@ app.post('/api/export/docx', async (req, res) => {
                 children: [
                   new TextRun({
                     text: plainText,
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 30,
                     bold: true,
                     color: '2B6CB0',
@@ -987,7 +1009,7 @@ app.post('/api/export/docx', async (req, res) => {
                 children: [
                   new TextRun({
                     text: plainText,
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 26,
                     bold: true,
                     color: '2C5282',
@@ -1013,15 +1035,15 @@ app.post('/api/export/docx', async (req, res) => {
                 children: [
                   new TextRun({
                     text: '« ',
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 22,
                     color: '3182CE',
                     rightToLeft: true,
                   }),
-                  ...parseHtmlToTextRuns(innerHtml),
+                  ...parseHtmlToTextRuns(innerHtml, fontFamily),
                   new TextRun({
                     text: ' »',
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 22,
                     color: '3182CE',
                     rightToLeft: true,
@@ -1036,7 +1058,7 @@ app.post('/api/export/docx', async (req, res) => {
                 alignment: AlignmentType.BOTH, // Justified
                 spacing: { line: 360, before: 100, after: 200 }, // 1.5 - 1.8 line spacing
                 bidirectional: true,
-                children: parseHtmlToTextRuns(innerHtml),
+                children: parseHtmlToTextRuns(innerHtml, fontFamily),
               })
             );
           }
@@ -1054,7 +1076,7 @@ app.post('/api/export/docx', async (req, res) => {
                 children: [
                   new TextRun({
                     text: line,
-                    font: 'Vazirmatn',
+                    font: fontDef,
                     size: 24,
                     rightToLeft: true,
                   }),
@@ -1079,6 +1101,63 @@ app.post('/api/export/docx', async (req, res) => {
               },
             },
           },
+          headers: showHeader && headerText ? {
+            default: new Header({
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  bidirectional: true,
+                  children: [
+                    new TextRun({
+                      text: headerText,
+                      font: fontDef,
+                      size: 18, // 9pt
+                      color: '718096',
+                      rightToLeft: true,
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          } : undefined,
+          footers: (showFooter || showPageNumbers) ? {
+            default: new Footer({
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  bidirectional: true,
+                  children: [
+                    ...(footerText ? [
+                      new TextRun({
+                        text: showPageNumbers ? `${footerText} • صفحه ` : footerText,
+                        font: fontDef,
+                        size: 18,
+                        color: '718096',
+                        rightToLeft: true,
+                      }),
+                    ] : (showPageNumbers ? [
+                      new TextRun({
+                        text: 'صفحه ',
+                        font: fontDef,
+                        size: 18,
+                        color: '718096',
+                        rightToLeft: true,
+                      }),
+                    ] : [])),
+                    ...(showPageNumbers ? [
+                      new TextRun({
+                        children: [PageNumber.CURRENT],
+                        font: fontDef,
+                        size: 18,
+                        color: '718096',
+                        rightToLeft: true,
+                      }),
+                    ] : []),
+                  ],
+                }),
+              ],
+            }),
+          } : undefined,
           children: docChildren,
         },
       ],

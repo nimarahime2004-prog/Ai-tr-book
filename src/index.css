@@ -91,9 +91,16 @@
 
 /* Print / PDF generation styles */
 @media print {
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm 12mm 15mm;
+  }
+
+  html, body {
+    background: transparent !important;
+    color: inherit !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .no-print {
@@ -102,6 +109,8 @@
 
   .print-only {
     display: block !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .book-page {

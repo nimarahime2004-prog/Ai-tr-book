@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Book,
   Sparkles,
@@ -9,7 +8,8 @@ import {
   Languages,
   PenLine,
   Calculator,
-  ShieldCheck
+  ShieldCheck,
+  Palette
 } from 'lucide-react';
 import { BookProject, ToneId } from '../types.ts';
 import { TONE_DEFINITIONS } from '../constants/tones.ts';
@@ -19,6 +19,7 @@ interface ProjectHeaderProps {
   onUpdateProject: (updates: Partial<BookProject>) => void;
   onOpenGlossaryModal: () => void;
   onOpenTokenModal: () => void;
+  onOpenExportModal?: () => void;
 }
 
 export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
@@ -26,6 +27,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
   onUpdateProject,
   onOpenGlossaryModal,
   onOpenTokenModal,
+  onOpenExportModal,
 }) => {
   const currentTone = TONE_DEFINITIONS.find(t => t.id === project.tone) || TONE_DEFINITIONS[0];
 
@@ -128,6 +130,18 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
               {project.glossary.length}
             </span>
           </button>
+
+          {/* Book Design & Export Studio Trigger */}
+          {onOpenExportModal && (
+            <button
+              onClick={onOpenExportModal}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-indigo-500/20 hover:from-amber-500/30 hover:to-indigo-500/30 text-amber-300 border border-amber-500/40 hover:border-amber-400 transition shadow-sm"
+              title="تنظیم هدر، فوتر، آدرس سایت، تم معنوی و خروجی PDF / Word"
+            >
+              <Palette className="w-3.5 h-3.5 text-amber-400" />
+              <span>دیزاین و خروجی کتاب</span>
+            </button>
+          )}
         </div>
 
       </div>

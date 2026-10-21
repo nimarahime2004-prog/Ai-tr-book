@@ -1,4 +1,5 @@
 import { BookProject } from '../types.ts';
+import { BOOK_THEMES } from '../constants/themes.ts';
 
 export async function downloadDocx(project: BookProject): Promise<boolean> {
   try {
@@ -22,6 +23,7 @@ export async function downloadDocx(project: BookProject): Promise<boolean> {
         author: project.author,
         translator: project.translator || 'سامانه هوشمند ترجمه کتاب',
         chapters,
+        designConfig: project.designConfig,
       }),
     });
 
@@ -47,12 +49,37 @@ export async function downloadDocx(project: BookProject): Promise<boolean> {
 }
 
 export function downloadWordHtml(project: BookProject) {
+  const design = project.designConfig || {
+    themeId: 'spiritual',
+    headerText: '',
+    footerText: '',
+    showHeader: false,
+    showFooter: false,
+    showPageNumbers: true,
+    fontFamily: 'Vazirmatn Medium',
+  };
+
+  const theme = BOOK_THEMES[design.themeId] || BOOK_THEMES.spiritual;
+  const bgColor = theme.pageBgColor || '#fbf6ea';
+  const headingColor = theme.headingColor || '#1a365d';
+  const accentColor = theme.accentColor || '#b45309';
+
   const chaptersHtml = project.chunks
     .filter(c => c.translatedHtml)
     .map(c => `
       <div style="page-break-before: always; margin-top: 30px;">
-        <h2 style="color: #1a365d; font-size: 18pt; text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">${c.chapterTitle} - بخش ${c.chunkNumber}</h2>
+        ${design.showHeader && design.headerText ? `
+        <div style="border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 24px; font-size: 9pt; color: #718096; display: flex; justify-content: space-between;">
+          <span>${design.headerText}</span>
+          <span dir="ltr">${project.originalTitle || ''}</span>
+        </div>` : ''}
+        <h2 style="color: ${headingColor}; font-size: 18pt; text-align: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">${c.chapterTitle} - بخش ${c.chunkNumber}</h2>
+        <div style="text-align: center; font-size: 11pt; color: ${accentColor}; margin: 8px 0 16px 0;">${theme.dividerSymbol || '❦ ✤ ❦'}</div>
         <div style="margin-top: 20px;">${c.translatedHtml}</div>
+        ${design.showFooter && design.footerText ? `
+        <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 35px; font-size: 9pt; color: #718096; text-align: center;">
+          ${design.footerText}
+        </div>` : ''}
       </div>
     `)
     .join('\n');
@@ -72,15 +99,16 @@ export function downloadWordHtml(project: BookProject) {
     </xml>
     <![endif]-->
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
       body {
-        font-family: 'Vazirmatn', 'B Nazanin', 'Tahoma', sans-serif;
+        font-family: '${design.fontFamily || "Vazirmatn Medium"}', 'Vazirmatn', 'B Nazanin', 'Tahoma', sans-serif;
         direction: rtl;
         text-align: right;
         margin: 40px;
+        background-color: ${bgColor};
         color: #2d3748;
       }
-      h1 { color: #1a365d; font-size: 24pt; margin-bottom: 20px; text-align: center; }
+      h1 { color: ${headingColor}; font-size: 24pt; margin-bottom: 20px; text-align: center; font-family: '${design.fontFamily || "Vazirmatn Medium"}', sans-serif; }
       h2 { color: #2b6cb0; font-size: 18pt; margin-top: 25px; margin-bottom: 12px; }
       h3 { color: #2c5282; font-size: 14pt; margin-top: 15px; margin-bottom: 8px; }
       p { line-height: 1.9; font-size: 12pt; text-align: justify; margin-bottom: 14px; }
@@ -93,6 +121,7 @@ export function downloadWordHtml(project: BookProject) {
       <h1>${project.title || project.originalTitle}</h1>
       <p style="font-size: 14pt; color: #4a5568;">نویسنده: ${project.author || 'نامشخص'}</p>
       <p style="font-size: 12pt; color: #718096; font-style: italic;">مترجم: ${project.translator || 'سامانه هوشمند ترجمه کتاب'}</p>
+      ${design.showHeader && design.headerText ? `<p style="font-size: 11pt; color: #a0aec0; margin-top: 15px;">${design.headerText}</p>` : ''}
     </div>
     ${chaptersHtml}
   </body>
