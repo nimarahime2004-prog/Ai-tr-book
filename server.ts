@@ -371,27 +371,54 @@ app.post('/api/keys/test', async (req, res) => {
 
   // Gemini Key Test
   const targetKey = (masked ? keyPool.find(k => k.masked === masked) : null) || keyPool[0];
-  const testKey = (apiKey && typeof apiKey === 'string' && apiKey.length > 8) ? apiKey : (targetKey?.key || process.env.GEMINI_API_KEY);
+  const testKey = (apiKey && typeof apiKey === 'string' && apiKey.length > 8) ? apiKey.trim() : (targetKey?.key || process.env.GEMINI_API_KEY);
 
   if (!testKey) {
-    return res.status(400).json({ error: 'کلید معتبری برای تست در استخر یافت نشد.' });
+    return res.json({ success: false, error: 'کلید معتبری برای تست در استخر یافت نشد.' });
   }
 
-  const testModel = model || 'gemini-3.8-flash';
+  const candidateModels = Array.from(new Set([
+    model || 'gemini-3.8-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest'
+  ]));
+
   const t0 = Date.now();
-  try {
-    const ai = new GoogleGenAI({
-      apiKey: testKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-    });
-    const result = await ai.models.generateContent({
-      model: testModel,
-      contents: 'Ping test for Persian book translation engine. Reply with exact word: PONG_OK',
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      },
-    });
-    const latencyMs = Date.now() - t0;
+  let lastGeminiError: any = null;
+  let successfulResult: any = null;
+  let modelThatWorked = candidateModels[0];
+
+  for (const candModel of candidateModels) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey: testKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' }, timeout: 12000 },
+      });
+      const result = await ai.models.generateContent({
+        model: candModel,
+        contents: 'Ping test for Persian book translation engine. Reply with exact word: PONG_OK',
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      });
+
+      successfulResult = result;
+      modelThatWorked = candModel;
+      break;
+    } catch (candErr: any) {
+      lastGeminiError = candErr;
+      const errMsg = String(candErr?.message || candErr);
+      // If 503 high demand or 404 model not found, try next candidate model
+      if (errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('404') || errMsg.includes('UNAVAILABLE')) {
+        continue;
+      } else {
+        break;
+      }
+    }
+  }
+
+  const latencyMs = Date.now() - t0;
+  if (successfulResult) {
     if (targetKey) {
       (targetKey as any).lastLatencyMs = latencyMs;
       targetKey.status = 'active';
@@ -401,18 +428,17 @@ app.post('/api/keys/test', async (req, res) => {
       success: true,
       latencyMs,
       masked: `${testKey.slice(0, 4)}...${testKey.slice(-4)}`,
-      response: result.text?.trim() || 'PONG_OK',
-      modelUsed: testModel,
-    });
-  } catch (err: any) {
-    const latencyMs = Date.now() - t0;
-    return res.status(500).json({
-      success: false,
-      latencyMs,
-      error: err?.message || 'خطا در برقراری ارتباط با مدل',
-      masked: `${testKey.slice(0, 4)}...${testKey.slice(-4)}`,
+      response: successfulResult.text?.trim() || 'PONG_OK',
+      modelUsed: modelThatWorked,
     });
   }
+
+  return res.json({
+    success: false,
+    latencyMs,
+    error: lastGeminiError?.message || 'خطا در برقراری ارتباط با مدل هوش مصنوعی',
+    masked: `${testKey.slice(0, 4)}...${testKey.slice(-4)}`,
+  });
 });
 
 // Remove a custom key
