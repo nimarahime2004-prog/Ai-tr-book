@@ -114,6 +114,8 @@ export function downloadWordHtml(project: BookProject) {
       p { line-height: 1.9; font-size: 12pt; text-align: justify; margin-bottom: 14px; }
       blockquote { border-right: 4px solid #3182ce; padding: 10px 18px; margin: 15px 0; background: #f7fafc; color: #4a5568; font-style: italic; }
       span.highlight { color: #9b2c2c; font-weight: bold; }
+      img, .book-embedded-image { max-width: 85%; height: auto; display: block; margin: 18px auto; border-radius: 8px; }
+      .book-illustration-wrap { text-align: center; margin: 20px 0; }
     </style>
   </head>
   <body>

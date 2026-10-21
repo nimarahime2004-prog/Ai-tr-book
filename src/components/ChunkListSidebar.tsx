@@ -8,7 +8,8 @@ import {
   AlertCircle,
   Search,
   Hash,
-  Layers
+  Layers,
+  Image as ImageIcon
 } from 'lucide-react';
 import { BookChunk } from '../types.ts';
 
@@ -153,9 +154,17 @@ export const ChunkListSidebar: React.FC<ChunkListSidebarProps> = ({
                   )}
                 </div>
 
-                {/* Subtitle & Words */}
+                {/* Subtitle & Words & Images */}
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
-                  <span>بخش {chunk.chunkNumber}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span>بخش {chunk.chunkNumber}</span>
+                    {chunk.hasImages && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25 font-sans" title={`این بخش دارای ${chunk.imageCount || 1} تصویر کتاب است`}>
+                        <ImageIcon className="w-2.5 h-2.5 text-amber-400" />
+                        <span>{chunk.imageCount || 1} تصویر</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 font-mono">
                     <span>{chunk.wordCount} کلمه</span>
                     <span>•</span>
@@ -166,7 +175,7 @@ export const ChunkListSidebar: React.FC<ChunkListSidebarProps> = ({
                 {/* Quick Translate Button on hover/active */}
                 <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
                   <span className="text-[10px] text-slate-500 truncate max-w-[150px]">
-                    {chunk.englishText.slice(0, 45)}...
+                    {chunk.englishText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 45)}...
                   </span>
                   <button
                     onClick={(e) => {

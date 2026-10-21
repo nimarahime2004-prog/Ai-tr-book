@@ -89,6 +89,31 @@
   border-radius: 4px;
 }
 
+/* Embedded illustrations & images styling */
+.book-embedded-image,
+.book-illustration-wrap img,
+.english-book-view img {
+  max-width: 88% !important;
+  height: auto !important;
+  margin: 1.5rem auto !important;
+  display: block !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.book-illustration-wrap {
+  text-align: center;
+  margin: 1.5rem 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.english-book-view p {
+  margin-bottom: 1rem;
+}
+
 /* Print / PDF generation styles */
 @media print {
   @page {

@@ -7,7 +7,10 @@ import dns from 'node:dns';
 dns.setDefaultResultOrder('ipv4first');
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, Packer, BorderStyle, Header, Footer, PageNumber } from 'docx';
+import { Document, Paragraph, TextRun, ImageRun, HeadingLevel, AlignmentType, Packer, BorderStyle, Header, Footer, PageNumber } from 'docx';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { BOOK_THEMES } from './src/constants/themes.ts';
 
 dotenv.config();
 
@@ -363,6 +366,20 @@ app.post('/api/calculate-tokens', (req, res) => {
   });
 });
 
+// Helper to restore high-resolution embedded images into translated Persian HTML
+function restoreImages(html: string, imageMap: Map<string, string>): string {
+  if (imageMap.size === 0) return html;
+  let restored = html;
+  for (const [token, fullTag] of imageMap.entries()) {
+    if (restored.includes(token)) {
+      restored = restored.replaceAll(token, `<div class="book-illustration-wrap my-4 text-center">${fullTag}</div>`);
+    } else {
+      restored += `\n<div class="book-illustration-wrap my-4 text-center">${fullTag}</div>\n`;
+    }
+  }
+  return restored;
+}
+
 app.post('/api/translate', async (req, res) => {
   const { chunkId, englishText, tone, glossary, previousSummary, chapterTitle, model, provider, apiKey, baseURL, serverPool } = req.body;
 
@@ -370,6 +387,20 @@ app.post('/api/translate', async (req, res) => {
     return res.status(400).json({ error: 'متن انگلیسی برای ترجمه الزامی است.' });
   }
 
+  // 0. Image preservation: replace heavy base64 images with lightweight tokens for the AI prompt
+  const imagePlaceholderMap = new Map<string, string>();
+  let cleanEnglishText = englishText;
+
+  const imgRegex = /<img\s+[^>]*src=["'](data:[^"']+)["'][^>]*>/gi;
+  let imgIndex = 0;
+  cleanEnglishText = englishText.replace(imgRegex, (fullImgTag) => {
+    const placeholderToken = `[[IMAGE_PRESERVED_SLOT_${imgIndex}]]`;
+    imagePlaceholderMap.set(placeholderToken, fullImgTag);
+    imgIndex++;
+    return `\n${placeholderToken}\n`;
+  });
+
+  const hasImages = imagePlaceholderMap.size > 0;
   const targetModel = model || 'gemini-3.8-flash';
 
   // Format glossary items
@@ -389,11 +420,12 @@ app.post('/api/translate', async (req, res) => {
 - Glossary / واژه‌نامه اختصاصی:
 ${glossaryText}
 ${previousSummary ? `\n[PREVIOUS SUMMARY / CONTEXT]\n${previousSummary}\n` : ''}
+${hasImages ? `\n[IMAGE PRESERVATION INSTRUCTION]\nThis text contains image placeholders like [[IMAGE_PRESERVED_SLOT_0]]. You MUST preserve every placeholder intact at its exact corresponding position between the translated paragraphs in Persian. Do NOT remove or modify image placeholders.\n` : ''}
 [CRITICAL INSTRUCTION]
 Do NOT summarize. Translate every single sentence, dialogue, nuance, and paragraph verbatim into fluent, natural Persian without omission or censorship.
 
 [INPUT TEXT TO TRANSLATE]
-${englishText}`;
+${cleanEnglishText}`;
 
   // 1. MULTI-SERVER FAILOVER POOL: If user has configured an active pool of servers/endpoints
   if (Array.isArray(serverPool) && serverPool.length > 0) {
@@ -441,7 +473,7 @@ ${englishText}`;
           console.log(`[Auto-Switching Engine] Success via Server "${server.name}"!`);
           return res.json({
             chunkId,
-            translatedHtml: cleanHtml,
+            translatedHtml: restoreImages(cleanHtml, imagePlaceholderMap),
             serverUsed: server.name,
             serverId: server.id,
             model: server.model || 'gemini-3.8-flash',
@@ -498,7 +530,7 @@ ${englishText}`;
           console.log(`[Auto-Switching Engine] Success via Server "${server.name}"!`);
           return res.json({
             chunkId,
-            translatedHtml: cleanHtml,
+            translatedHtml: restoreImages(cleanHtml, imagePlaceholderMap),
             serverUsed: server.name,
             serverId: server.id,
             model: server.model,
@@ -560,7 +592,7 @@ ${englishText}`;
 
       return res.json({
         chunkId,
-        translatedHtml: cleanHtml,
+        translatedHtml: restoreImages(cleanHtml, imagePlaceholderMap),
         keyUsed: `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`,
         model: targetModel,
         provider,
@@ -688,7 +720,7 @@ ${englishText}`;
   if (successfulHtml) {
     return res.json({
       chunkId,
-      translatedHtml: successfulHtml,
+      translatedHtml: restoreImages(successfulHtml, imagePlaceholderMap),
       keyUsed: keyUsedName,
       model: successfulModel,
       fallbackUsed: successfulModel !== targetModel,
@@ -751,6 +783,226 @@ ${sampleText.slice(0, 4000)}`;
     return res.json({ glossary: parsed });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'خطا در استخراج واژه‌نامه' });
+  }
+});
+
+// Endpoint for importing DOCX, PDF, and TXT files with full text and image extraction
+app.post('/api/import/file', async (req, res) => {
+  try {
+    const { fileName, fileData, fileType, maxWordsPerChunk = 700 } = req.body;
+    if (!fileData || typeof fileData !== 'string') {
+      return res.status(400).json({ error: 'محتوای باینری فایل (base64) ارسال نشده است.' });
+    }
+
+    const buffer = Buffer.from(fileData, 'base64');
+    const detectedType = fileType || (fileName?.endsWith('.docx') ? 'docx' : fileName?.endsWith('.pdf') ? 'pdf' : 'txt');
+
+    const cleanBaseName = (fileName || 'کتاب جدید').replace(/\.[^/.]+$/, '');
+    let title = cleanBaseName;
+    let originalTitle = cleanBaseName;
+    let author = 'نامشخص';
+    const chunks: any[] = [];
+    let totalImagesCount = 0;
+
+    if (detectedType === 'docx') {
+      let imageIdx = 0;
+      const options = {
+        convertImage: mammoth.images.imgElement((image: any) => {
+          imageIdx++;
+          totalImagesCount++;
+          return image.read('base64').then((imageBuffer: string) => {
+            return {
+              src: `data:${image.contentType};base64,${imageBuffer}`,
+              class: 'book-embedded-image rounded-xl shadow-md my-4 max-w-full mx-auto block border border-slate-300',
+              alt: `تصویر شماره ${imageIdx} کتاب`,
+            };
+          });
+        }),
+      };
+
+      const result = await mammoth.convertToHtml({ buffer }, options);
+      const html = result.value;
+
+      // Extract sections based on h1, h2, or paragraph flow
+      const rawBlocks = html.split(/(?=<h[1-3][^>]*>)/gi).filter(b => b.trim().length > 0);
+      let globalChunkCounter = 1;
+
+      if (rawBlocks.length === 0) {
+        rawBlocks.push(`<p>${html}</p>`);
+      }
+
+      rawBlocks.forEach((block, bIdx) => {
+        const headingMatch = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i.exec(block);
+        const chapterTitle = headingMatch ? headingMatch[1].replace(/<[^>]+>/g, '').trim() : `فصل ${bIdx + 1}`;
+
+        // Split paragraphs and inline images
+        const paragraphs = block.split(/(?=<p[^>]*>)|(?=<img[^>]*>)/gi).filter(p => p.trim().length > 0);
+        let currentChunkHtml: string[] = [];
+        let currentWordCount = 0;
+        let subChunkNumber = 1;
+
+        const commitSubChunk = () => {
+          if (currentChunkHtml.length === 0) return;
+          const chunkHtml = currentChunkHtml.join('\n');
+          const plainText = chunkHtml.replace(/<img[^>]*>/gi, '').replace(/<[^>]+>/g, ' ').trim();
+          const words = plainText.split(/\s+/).filter(Boolean).length;
+          const hasImages = /<img[^>]*>/i.test(chunkHtml);
+          const imageCount = (chunkHtml.match(/<img[^>]*>/gi) || []).length;
+
+          chunks.push({
+            id: `chk_${Date.now()}_${globalChunkCounter}`,
+            chapterNumber: bIdx + 1,
+            chapterTitle,
+            chunkNumber: subChunkNumber,
+            englishText: chunkHtml,
+            wordCount: Math.max(1, words),
+            estimatedTokens: Math.ceil(words * 1.35),
+            status: 'idle',
+            hasImages,
+            imageCount,
+          });
+
+          globalChunkCounter++;
+          subChunkNumber++;
+          currentChunkHtml = [];
+          currentWordCount = 0;
+        };
+
+        paragraphs.forEach(p => {
+          const pWords = p.replace(/<img[^>]*>/gi, '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+          if (currentWordCount + pWords > maxWordsPerChunk && currentWordCount > 200) {
+            commitSubChunk();
+          }
+          currentChunkHtml.push(p);
+          currentWordCount += pWords;
+        });
+
+        commitSubChunk();
+      });
+
+    } else if (detectedType === 'pdf') {
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdfDoc = await loadingTask.promise;
+
+      // Extract embedded JPEG & PNG stream images from PDF binary
+      const extractedImages: string[] = [];
+      let offset = 0;
+      while (offset < buffer.length - 8) {
+        // Check JPEG
+        if (buffer[offset] === 0xFF && buffer[offset + 1] === 0xD8 && buffer[offset + 2] === 0xFF) {
+          let end = offset + 2;
+          while (end < buffer.length - 1) {
+            if (buffer[end] === 0xFF && buffer[end + 1] === 0xD9) {
+              const jpegBuf = buffer.subarray(offset, end + 2);
+              if (jpegBuf.length > 2500) { // Keep images > 2.5KB
+                extractedImages.push(`data:image/jpeg;base64,${jpegBuf.toString('base64')}`);
+              }
+              offset = end + 2;
+              break;
+            }
+            end++;
+          }
+          if (end >= buffer.length - 1) offset += 2;
+        }
+        // Check PNG
+        else if (
+          buffer[offset] === 0x89 && buffer[offset + 1] === 0x50 && buffer[offset + 2] === 0x4E && buffer[offset + 3] === 0x47 &&
+          buffer[offset + 4] === 0x0D && buffer[offset + 5] === 0x0A && buffer[offset + 6] === 0x1A && buffer[offset + 7] === 0x0A
+        ) {
+          let end = offset + 8;
+          while (end < buffer.length - 8) {
+            if (buffer[end] === 0x49 && buffer[end + 1] === 0x45 && buffer[end + 2] === 0x4E && buffer[end + 3] === 0x44) {
+              const pngBuf = buffer.subarray(offset, end + 8);
+              if (pngBuf.length > 2000) {
+                extractedImages.push(`data:image/png;base64,${pngBuf.toString('base64')}`);
+              }
+              offset = end + 8;
+              break;
+            }
+            end++;
+          }
+          if (end >= buffer.length - 8) offset += 4;
+        } else {
+          offset++;
+        }
+      }
+
+      totalImagesCount = extractedImages.length;
+      let globalChunkCounter = 1;
+      let imgIndex = 0;
+
+      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageLines: string[] = [];
+        let currentLine = '';
+        let lastY: number | null = null;
+
+        for (const item of textContent.items as any[]) {
+          if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
+            if (currentLine.trim()) pageLines.push(currentLine.trim());
+            currentLine = item.str;
+          } else {
+            currentLine += (currentLine ? ' ' : '') + item.str;
+          }
+          lastY = item.transform[5];
+        }
+        if (currentLine.trim()) pageLines.push(currentLine.trim());
+
+        const pageText = pageLines.join('\n\n');
+        const words = pageText.split(/\s+/).filter(Boolean).length;
+        if (words === 0 && extractedImages.length === 0) continue;
+
+        let pageHtml = pageLines.map(l => `<p>${l}</p>`).join('\n');
+        let pageImageCount = 0;
+        if (imgIndex < extractedImages.length) {
+          pageHtml += `\n<div class="book-illustration-wrap my-4 text-center"><img src="${extractedImages[imgIndex]}" class="book-embedded-image rounded-xl shadow-md my-3 max-w-full mx-auto block border border-slate-300" alt="تصویر صفحه ${pageNum} کتاب" /></div>`;
+          imgIndex++;
+          pageImageCount++;
+        }
+
+        chunks.push({
+          id: `chk_${Date.now()}_${globalChunkCounter}`,
+          chapterNumber: pageNum,
+          chapterTitle: `صفحه ${pageNum}`,
+          chunkNumber: 1,
+          englishText: pageHtml,
+          wordCount: Math.max(1, words),
+          estimatedTokens: Math.ceil(words * 1.35),
+          status: 'idle',
+          hasImages: pageImageCount > 0,
+          imageCount: pageImageCount,
+        });
+        globalChunkCounter++;
+      }
+    } else {
+      // Plain text fallback
+      const rawText = buffer.toString('utf-8');
+      chunks.push({
+        id: `chk_${Date.now()}_1`,
+        chapterNumber: 1,
+        chapterTitle: 'متن اصلی کتاب',
+        chunkNumber: 1,
+        englishText: rawText,
+        wordCount: rawText.split(/\s+/).filter(Boolean).length,
+        estimatedTokens: Math.ceil(rawText.split(/\s+/).filter(Boolean).length * 1.35),
+        status: 'idle',
+        hasImages: false,
+        imageCount: 0,
+      });
+    }
+
+    return res.json({
+      success: true,
+      title,
+      originalTitle,
+      author,
+      chunks,
+      totalImagesCount,
+    });
+  } catch (err: any) {
+    console.error('File import error:', err);
+    return res.status(500).json({ error: `خطا در پردازش فایل: ${err?.message || 'مشکل در خواندن فایل'}` });
   }
 });
 
@@ -947,18 +1199,85 @@ app.post('/api/export/docx', async (req, res) => {
           );
         }
 
-        // Parse paragraphs and blockquotes from HTML
+        // Parse paragraphs, blockquotes, headings, divs, and embedded images from HTML
         const html = ch.htmlContent || '';
-        const blockRegex = /<(h[1-3]|p|blockquote)[^>]*>([\s\S]*?)<\/\1>/gi;
+        const blockRegex = /<(h[1-3]|p|blockquote|div|figure)[^>]*>([\s\S]*?)<\/\1>|<img\s+[^>]*src=["'](data:image\/[^"']+)["'][^>]*>/gi;
         let match;
         let foundAny = false;
 
         while ((match = blockRegex.exec(html)) !== null) {
           foundAny = true;
+
+          // If standalone image was matched
+          if (match[3]) {
+            const dataUrl = match[3];
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx !== -1) {
+              try {
+                const base64Data = dataUrl.slice(commaIdx + 1).replace(/\s+/g, '');
+                const imgBuffer = Buffer.from(base64Data, 'base64');
+                const isJpg = dataUrl.includes('image/jpeg') || dataUrl.includes('image/jpg');
+                docChildren.push(
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 240, after: 240 },
+                    children: [
+                      new ImageRun({
+                        data: imgBuffer,
+                        transformation: {
+                          width: 440,
+                          height: 280,
+                        },
+                        type: isJpg ? 'jpg' : 'png',
+                      } as any),
+                    ],
+                  })
+                );
+              } catch (imgErr) {
+                console.warn('Could not add image to docx:', imgErr);
+              }
+            }
+            continue;
+          }
+
           const tag = match[1].toLowerCase();
           const innerHtml = match[2];
-          const plainText = innerHtml.replace(/<[^>]+>/g, '').trim();
 
+          // Check if block contains any embedded images (e.g. inside div, figure, or p)
+          const embeddedImgRegex = /<img\s+[^>]*src=["'](data:image\/[^"']+)["'][^>]*>/gi;
+          let imgMatch;
+          while ((imgMatch = embeddedImgRegex.exec(innerHtml)) !== null) {
+            try {
+              const dataUrl = imgMatch[1];
+              const commaIdx = dataUrl.indexOf(',');
+              if (commaIdx !== -1) {
+                const base64Data = dataUrl.slice(commaIdx + 1).replace(/\s+/g, '');
+                const imgBuffer = Buffer.from(base64Data, 'base64');
+                const isJpg = dataUrl.includes('image/jpeg') || dataUrl.includes('image/jpg');
+                docChildren.push(
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 240, after: 240 },
+                    children: [
+                      new ImageRun({
+                        data: imgBuffer,
+                        transformation: {
+                          width: 440,
+                          height: 280,
+                        },
+                        type: isJpg ? 'jpg' : 'png',
+                      } as any),
+                    ],
+                  })
+                );
+              }
+            } catch (imgErr) {
+              console.warn('Could not add embedded image to docx:', imgErr);
+            }
+          }
+
+          const cleanHtmlNoImg = innerHtml.replace(/<img[^>]*>/gi, '');
+          const plainText = cleanHtmlNoImg.replace(/<[^>]+>/g, '').trim();
           if (!plainText) continue;
 
           if (tag === 'h1') {
@@ -1088,7 +1407,12 @@ app.post('/api/export/docx', async (req, res) => {
       });
     }
 
+    const themeKey = (designConfig?.themeId || 'spiritual') as keyof typeof BOOK_THEMES;
+    const theme = BOOK_THEMES[themeKey] || BOOK_THEMES.spiritual;
     const doc = new Document({
+      background: {
+        color: (theme.pageBgColor || '#fbf6ea').replace('#', ''),
+      },
       sections: [
         {
           properties: {

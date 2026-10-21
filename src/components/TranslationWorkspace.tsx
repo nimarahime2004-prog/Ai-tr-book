@@ -16,7 +16,8 @@ import {
   Split,
   Maximize2,
   Server,
-  Zap
+  Zap,
+  Image as ImageIcon
 } from 'lucide-react';
 import { BookChunk, BookProject, APIServerEndpoint } from '../types.ts';
 
@@ -286,6 +287,12 @@ export const TranslationWorkspace: React.FC<TranslationWorkspaceProps> = ({
                   <span className="font-mono text-[11px] bg-slate-800 px-2 py-0.5 rounded text-slate-400">
                     {currentChunk?.wordCount} کلمه
                   </span>
+                  {currentChunk?.hasImages && (
+                    <span className="flex items-center gap-1 font-mono text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                      <ImageIcon className="w-3 h-3 text-amber-400" />
+                      <span>{currentChunk.imageCount || 1} تصویر استخراج‌شده</span>
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={handleCopyEnglish}
@@ -297,12 +304,25 @@ export const TranslationWorkspace: React.FC<TranslationWorkspaceProps> = ({
                 </button>
               </div>
 
-              {/* English Text Content */}
+              {/* English Text & Embedded Images Content */}
               <div
                 dir="ltr"
-                className="flex-1 overflow-y-auto p-5 text-sm leading-relaxed text-slate-300 font-serif whitespace-pre-wrap select-text selection:bg-blue-600 selection:text-white"
+                className="flex-1 overflow-y-auto p-5 text-sm leading-relaxed text-slate-300 font-serif select-text selection:bg-blue-600 selection:text-white"
               >
-                {currentChunk?.englishText}
+                {currentChunk?.englishText ? (
+                  currentChunk.englishText.includes('<') ? (
+                    <div
+                      className="english-book-view space-y-4"
+                      dangerouslySetInnerHTML={{ __html: currentChunk.englishText }}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap leading-relaxed">
+                      {currentChunk.englishText}
+                    </div>
+                  )
+                ) : (
+                  <div className="text-slate-500 italic">متنی برای این بخش وجود ندارد.</div>
+                )}
               </div>
 
             </div>

@@ -74,6 +74,8 @@ export interface BookChunk {
   serverUsed?: string;
   switchOccurred?: boolean;
   translatedAt?: number;
+  hasImages?: boolean;
+  imageCount?: number;
 }
 
 export type BookThemeId =
@@ -124,6 +126,8 @@ export interface BookProject {
   updatedAt: number;
   rollingSummary?: string;
   designConfig?: BookDesignConfig;
+  sourceFileType?: 'txt' | 'docx' | 'pdf' | 'json';
+  totalImagesCount?: number;
 }
 
 export interface ServerKeyStatus {
