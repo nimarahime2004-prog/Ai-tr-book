@@ -139,17 +139,20 @@ export const TranslationWorkspace: React.FC<TranslationWorkspaceProps> = ({
         {/* Right Side: Translation Actions & Rate Limiter Bar */}
         <div className="flex items-center gap-2 sm:gap-2.5">
           
-          {/* Active Failover Server Pool Button */}
+          {/* Active Failover Server Pool Button & API Edit Shortcut */}
           {onOpenServerPoolModal && (
             <button
               onClick={onOpenServerPoolModal}
-              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition"
-              title="مشاهده و مدیریت سرورهای فعال در چرخش خودکار"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition shadow-sm"
+              title="مشاهده، تست و ویرایش تنظیمات و کلیدهای API سرورها"
             >
               <Server className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px]">سوئیچ خودکار:</span>
+              <span className="hidden sm:inline text-[11px]">سوئیچ خودکار:</span>
               <span className="text-emerald-400 font-bold font-mono text-[11px]">
                 {serverPool?.filter(s => s.isEnabled).length || 1} سرور
+              </span>
+              <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 mr-0.5 font-bold">
+                ویرایش API
               </span>
             </button>
           )}
@@ -403,6 +406,16 @@ export const TranslationWorkspace: React.FC<TranslationWorkspaceProps> = ({
                         <RotateCw className="w-3.5 h-3.5" />
                         <span>تلاش مجدد</span>
                       </button>
+
+                      {onOpenServerPoolModal && (
+                        <button
+                          onClick={onOpenServerPoolModal}
+                          className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 transition flex items-center justify-center gap-1.5"
+                        >
+                          <Server className="w-3.5 h-3.5 text-amber-400" />
+                          <span>ویرایش سرورها و کلیدهای API</span>
+                        </button>
+                      )}
 
                       {onUpdateModel && (
                         <button

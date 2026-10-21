@@ -214,6 +214,90 @@ app.post('/api/keys/add', async (req, res) => {
   return res.json({ success: true, key: { masked, label: newKeyObj.label, status: 'active' } });
 });
 
+// Helper to normalize and auto-fix base URLs (prevent 404 HTML error pages)
+function normalizeBaseUrl(provider: string, baseURL?: string): string {
+  let url = (baseURL || '').trim().replace(/\/+$/, '');
+  if (!url) {
+    if (provider === 'openrouter') return 'https://openrouter.ai/api/v1';
+    if (provider === 'deepseek') return 'https://api.deepseek.com/v1';
+    if (provider === 'glm') return 'https://open.bigmodel.cn/api/paas/v4';
+    if (provider === 'groq') return 'https://api.groq.com/openai/v1';
+    return 'https://api.openai.com/v1';
+  }
+
+  // Auto-correct common missing /v1 suffixes
+  if (provider === 'openrouter') {
+    if (url === 'https://openrouter.ai' || url === 'http://openrouter.ai') {
+      return 'https://openrouter.ai/api/v1';
+    }
+    if (url.endsWith('/api')) {
+      return `${url}/v1`;
+    }
+  } else if (provider === 'openai') {
+    if (url === 'https://api.openai.com' || url === 'http://api.openai.com') {
+      return 'https://api.openai.com/v1';
+    }
+  } else if (provider === 'deepseek') {
+    if (url === 'https://api.deepseek.com' || url === 'http://api.deepseek.com') {
+      return 'https://api.deepseek.com/v1';
+    }
+  }
+
+  return url;
+}
+
+// Helper to safely parse responses and avoid "Unexpected token '<', <!doctype" syntax crashes
+async function parseResponseSafely(response: Response): Promise<{ isJson: boolean; data: any; errorMessage?: string }> {
+  let rawText = '';
+  try {
+    rawText = await response.text();
+  } catch (readErr: any) {
+    return { isJson: false, data: null, errorMessage: `خطا در خواندن پاسخ سرور: ${readErr.message}` };
+  }
+
+  const trimmed = rawText.trim();
+  try {
+    const data = JSON.parse(rawText);
+    return { isJson: true, data };
+  } catch {
+    // If response starts with HTML / doctype, create a human-friendly message
+    if (trimmed.startsWith('<') || trimmed.toLowerCase().includes('<!doctype') || trimmed.toLowerCase().includes('<html')) {
+      if (response.status === 404) {
+        return {
+          isJson: false,
+          data: null,
+          errorMessage: 'خطای ۴۰۴: مسیر یا آدرس سرور (Base URL) نامعتبر است و سرور صفحه وب ۴۰۴ ارسال کرد. لطفاً آدرس را با /v1 بررسی و ویرایش نمایید (مثلاً: https://openrouter.ai/api/v1).',
+        };
+      }
+      if (response.status === 502 || response.status === 504 || response.status === 520 || response.status === 524) {
+        return {
+          isJson: false,
+          data: null,
+          errorMessage: `خطای سرور یا کلودفلر (کد ${response.status}): ارتباط با سرور هوش مصنوعی به دلیل قطعی موقت یا فیلترینگ با پاسخ وب متوقف شد.`,
+        };
+      }
+      if (response.status === 401 || response.status === 403) {
+        return {
+          isJson: false,
+          data: null,
+          errorMessage: `خطای احراز هویت (${response.status}): کلید API نامعتبر است یا توسط ارائه‌دهنده رد شد.`,
+        };
+      }
+      return {
+        isJson: false,
+        data: null,
+        errorMessage: `سرور به جای خروجی داده JSON، یک صفحه وب HTML با کد وضعیت ${response.status} برگرداند. لطفاً در بخش ویرایش API آدرس سرور را تصحیح فرمایید.`,
+      };
+    }
+
+    return {
+      isJson: false,
+      data: null,
+      errorMessage: trimmed.slice(0, 250) || `پاسخ نامعتبر از سرور با کد ${response.status}`,
+    };
+  }
+}
+
 // Test Connection for a specific key / provider
 app.post('/api/keys/test', async (req, res) => {
   const { provider, apiKey, baseURL, model, masked } = req.body;
@@ -221,10 +305,11 @@ app.post('/api/keys/test', async (req, res) => {
   // If testing a non-Gemini provider (OpenAI, OpenRouter, DeepSeek, GLM, Custom proxy)
   if (provider && provider !== 'gemini') {
     if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 4) {
-      return res.status(400).json({ error: 'لطفاً کلید API معتبر برای این ارائه‌دهنده را وارد کنید.' });
+      return res.status(400).json({ success: false, error: 'لطفاً کلید API معتبر برای این ارائه‌دهنده را وارد کنید.' });
     }
 
-    const targetUrl = `${(baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
+    const cleanBaseUrl = normalizeBaseUrl(provider, baseURL);
+    const targetUrl = `${cleanBaseUrl.replace(/\/+$/, '')}/chat/completions`;
     const testModel = model || (provider === 'openrouter' ? 'deepseek/deepseek-r1' : 'gpt-4o-mini');
     const t0 = Date.now();
 
@@ -247,10 +332,23 @@ app.post('/api/keys/test', async (req, res) => {
       });
 
       const latencyMs = Date.now() - t0;
-      const data = await response.json();
+      const parseResult = await parseResponseSafely(response);
 
+      if (!parseResult.isJson) {
+        return res.json({
+          success: false,
+          latencyMs,
+          error: parseResult.errorMessage || 'پاسخ دریافتی نامعتبر بود و قالب JSON نداشت.',
+        });
+      }
+
+      const data = parseResult.data;
       if (!response.ok) {
-        throw new Error(data.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+        return res.json({
+          success: false,
+          latencyMs,
+          error: data?.error?.message || `خطای سرور HTTP ${response.status}: ${response.statusText}`,
+        });
       }
 
       const answer = data.choices?.[0]?.message?.content?.trim() || 'PONG_OK';
@@ -263,7 +361,7 @@ app.post('/api/keys/test', async (req, res) => {
       });
     } catch (err: any) {
       const latencyMs = Date.now() - t0;
-      return res.status(500).json({
+      return res.json({
         success: false,
         latencyMs,
         error: err?.message || 'خطا در ارتباط با سرور ارائه‌دهنده',
@@ -488,7 +586,8 @@ ${cleanEnglishText}`;
             throw new Error(`کلید API برای سرور "${server.name}" تنظیم نشده است.`);
           }
 
-          const targetUrl = `${(server.baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
+          const cleanBaseUrl = normalizeBaseUrl(server.providerType, server.baseURL);
+          const targetUrl = `${cleanBaseUrl.replace(/\/+$/, '')}/chat/completions`;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s failover timeout
 
@@ -515,9 +614,14 @@ ${cleanEnglishText}`;
           });
           clearTimeout(timeoutId);
 
-          const data = await response.json();
+          const parseResult = await parseResponseSafely(response);
+          if (!parseResult.isJson) {
+            throw new Error(parseResult.errorMessage || `خطا در دریافت خروجی از سرور ${server.name}`);
+          }
+
+          const data = parseResult.data;
           if (!response.ok) {
-            throw new Error(data.error?.message || `خطای HTTP ${response.status}`);
+            throw new Error(data?.error?.message || `خطای HTTP ${response.status}`);
           }
 
           let cleanHtml = (data.choices?.[0]?.message?.content || '').trim();
@@ -554,7 +658,8 @@ ${cleanEnglishText}`;
       return res.status(400).json({ error: `کلید API برای ارائه‌دهنده ${provider} وارد نشده است.` });
     }
 
-    const targetUrl = `${(baseURL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
+    const cleanBaseUrl = normalizeBaseUrl(provider, baseURL);
+    const targetUrl = `${cleanBaseUrl.replace(/\/+$/, '')}/chat/completions`;
     try {
       await enforceRateLimit();
       const response = await fetch(targetUrl, {
@@ -578,9 +683,14 @@ ${cleanEnglishText}`;
         })
       });
 
-      const data = await response.json();
+      const parseResult = await parseResponseSafely(response);
+      if (!parseResult.isJson) {
+        throw new Error(parseResult.errorMessage || `خطا در دریافت پاسخ از ${provider}`);
+      }
+
+      const data = parseResult.data;
       if (!response.ok) {
-        throw new Error(data.error?.message || `خطای سرور ${response.status}`);
+        throw new Error(data?.error?.message || `خطای سرور ${response.status}`);
       }
 
       let cleanHtml = (data.choices?.[0]?.message?.content || '').trim();

@@ -340,10 +340,21 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      const rawText = await res.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        const isHtml = rawText.trim().startsWith('<') || rawText.toLowerCase().includes('<!doctype');
+        throw new Error(
+          isHtml
+            ? `سرور ارائه‌دهنده پاسخ وب HTML فرستاد (کد وضعیت ${res.status}). لطفاً آدرس سرور (Base URL) و کلید را در بخش «مدیریت و ویرایش سرورها» بازبینی نمایید.`
+            : `پاسخ دریافتی نامعتبر بود و ساختار JSON نداشت (کد ${res.status}).`
+        );
+      }
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'خطا در دریافت ترجمه از هوش مصنوعی');
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'خطا در دریافت ترجمه از هوش مصنوعی');
       }
 
       setBooks(prev =>

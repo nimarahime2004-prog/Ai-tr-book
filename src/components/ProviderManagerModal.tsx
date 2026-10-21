@@ -19,7 +19,10 @@ import {
   ArrowDown,
   ToggleLeft,
   ToggleRight,
-  Sliders
+  Sliders,
+  Edit3,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { APIServerEndpoint, ProviderType } from '../types.ts';
 
@@ -44,6 +47,19 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
   const [newBaseURL, setNewBaseURL] = useState('https://openrouter.ai/api/v1');
   const [newApiKey, setNewApiKey] = useState('');
   const [newModel, setNewModel] = useState('deepseek/deepseek-r1');
+  const [showNewKey, setShowNewKey] = useState(false);
+
+  // Edit server state
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
+  const [editServerData, setEditServerData] = useState<{
+    name: string;
+    providerType: ProviderType;
+    baseURL: string;
+    apiKey: string;
+    model: string;
+    isEnabled: boolean;
+  } | null>(null);
+  const [showEditKey, setShowEditKey] = useState(false);
   
   // Testing states
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -82,6 +98,85 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
     }
   };
 
+  const handleEditProviderTypeChange = (type: ProviderType) => {
+    if (!editServerData) return;
+    let defBase = editServerData.baseURL;
+    let defModel = editServerData.model;
+
+    if (type === 'gemini') {
+      defBase = '';
+      defModel = 'gemini-3.8-flash';
+    } else if (type === 'openrouter') {
+      if (!defBase || defBase.includes('openai.com') || defBase.includes('deepseek.com')) defBase = 'https://openrouter.ai/api/v1';
+      if (!defModel || defModel.includes('gemini') || defModel.includes('gpt')) defModel = 'deepseek/deepseek-r1';
+    } else if (type === 'openai') {
+      if (!defBase || defBase.includes('openrouter')) defBase = 'https://api.openai.com/v1';
+      if (!defModel || defModel.includes('deepseek')) defModel = 'gpt-4o';
+    } else if (type === 'deepseek') {
+      if (!defBase || defBase.includes('openrouter')) defBase = 'https://api.deepseek.com/v1';
+      if (!defModel || defModel.includes('gpt')) defModel = 'deepseek-chat';
+    } else if (type === 'glm') {
+      defBase = 'https://open.bigmodel.cn/api/paas/v4';
+      defModel = 'glm-4-flash';
+    } else if (type === 'custom') {
+      if (!defBase) defBase = 'https://api.groq.com/openai/v1';
+    }
+
+    setEditServerData({
+      ...editServerData,
+      providerType: type,
+      baseURL: defBase,
+      model: defModel,
+    });
+  };
+
+  const handleStartEdit = (server: APIServerEndpoint) => {
+    setEditingServerId(server.id);
+    setEditServerData({
+      name: server.name,
+      providerType: server.providerType,
+      baseURL: server.baseURL,
+      apiKey: server.apiKey,
+      model: server.model,
+      isEnabled: server.isEnabled,
+    });
+    setShowEditKey(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingServerId(null);
+    setEditServerData(null);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingServerId || !editServerData) return;
+
+    if (editServerData.providerType !== 'gemini' && !editServerData.apiKey.trim()) {
+      alert('لطفاً کلید API را وارد فرمایید.');
+      return;
+    }
+
+    onUpdateServerPool(
+      serverPool.map(s => {
+        if (s.id !== editingServerId) return s;
+        return {
+          ...s,
+          name: editServerData.name.trim() || s.name,
+          providerType: editServerData.providerType,
+          baseURL: editServerData.baseURL.trim(),
+          apiKey: editServerData.apiKey.trim(),
+          model: editServerData.model.trim() || s.model,
+        };
+      })
+    );
+
+    setSaveBanner(`تنظیمات سرور «${editServerData.name}» با موفقیت به‌روزرسانی و ذخیره شد.`);
+    setTimeout(() => setSaveBanner(null), 3500);
+    setEditingServerId(null);
+    setEditServerData(null);
+  };
+
   const handleTestServer = async (server: { providerType: ProviderType; apiKey: string; baseURL: string; model: string }, id: string) => {
     setTestingId(id);
     try {
@@ -96,20 +191,32 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      const rawText = await res.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        const isHtml = rawText.trim().startsWith('<') || rawText.toLowerCase().includes('<!doctype');
+        throw new Error(
+          isHtml
+            ? `سرور ارائه‌دهنده پاسخ وب HTML فرستاد (کد وضعیت ${res.status}). لطفاً آدرس سرور (Base URL) را بازبینی فرمایید (باید به /v1 ختم شود).`
+            : `پاسخ سرور قالب معتبر JSON نداشت (کد ${res.status}).`
+        );
+      }
+
       setTestResults(prev => ({
         ...prev,
         [id]: {
-          success: res.ok && data.success,
-          latencyMs: data.latencyMs,
-          error: data.error,
+          success: res.ok && Boolean(data?.success),
+          latencyMs: data?.latencyMs,
+          error: data?.error,
         },
       }));
 
       // Update in server pool if it exists
       if (serverPool.some(s => s.id === id)) {
         onUpdateServerPool(
-          serverPool.map(s => (s.id === id ? { ...s, lastLatencyMs: data.latencyMs, lastTestedAt: Date.now() } : s))
+          serverPool.map(s => (s.id === id ? { ...s, lastLatencyMs: data?.latencyMs, lastTestedAt: Date.now() } : s))
         );
       }
     } catch (err: any) {
@@ -117,7 +224,7 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
         ...prev,
         [id]: {
           success: false,
-          error: err.message || 'خطا در ارسال تست',
+          error: err.message || 'خطا در ارسال تست اتصال',
         },
       }));
     } finally {
@@ -371,12 +478,12 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
                 const testResult = testResults[server.id];
 
                 return (
-                  <div
-                    key={server.id}
-                    className={`p-4 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                      server.isEnabled ? 'bg-slate-900/40 hover:bg-slate-900/70' : 'bg-slate-950/80 opacity-60'
-                    }`}
-                  >
+                  <div key={server.id} className="transition">
+                    <div
+                      className={`p-4 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        server.isEnabled ? 'bg-slate-900/40 hover:bg-slate-900/70' : 'bg-slate-950/80 opacity-60'
+                      }`}
+                    >
                     
                     {/* Left details */}
                     <div className="flex items-start gap-3">
@@ -465,6 +572,26 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
                         <span>{isTestingThis ? 'درحال تست...' : 'تست پینگ'}</span>
                       </button>
 
+                      {/* Edit Server & API Button */}
+                      <button
+                        onClick={() => {
+                          if (editingServerId === server.id) {
+                            handleCancelEdit();
+                          } else {
+                            handleStartEdit(server);
+                          }
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition border flex items-center gap-1.5 ${
+                          editingServerId === server.id
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                        }`}
+                        title="ویرایش کلید API، آدرس، مدل و نام این سرور"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{editingServerId === server.id ? 'بستن ویرایش' : 'ویرایش API'}</span>
+                      </button>
+
                       {/* Enable/Disable Toggle */}
                       <button
                         onClick={() => handleToggleServer(server.id)}
@@ -509,8 +636,162 @@ export const ProviderManagerModal: React.FC<ProviderManagerModalProps> = ({
                     </div>
 
                   </div>
-                );
-              })}
+
+                  {/* Inline Server / API Editing Panel */}
+                  {editingServerId === server.id && editServerData && (
+                    <form onSubmit={handleSaveEdit} className="p-4 bg-slate-900 border-t border-amber-500/30 space-y-3.5 animate-fadeIn">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                          <Edit3 className="w-4 h-4 text-amber-400" />
+                          <span>ویرایش مشخصات و کلید API برای «{server.name}»:</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          تغییرات به طور زنده ذخیره می‌شود
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-slate-300 mb-1 font-semibold">عنوان یا برچسب سرور:</label>
+                          <input
+                            type="text"
+                            value={editServerData.name}
+                            onChange={e => setEditServerData({ ...editServerData, name: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-300 mb-1 font-semibold">نوع ارائه‌دهنده مرجع:</label>
+                          <select
+                            value={editServerData.providerType}
+                            onChange={e => handleEditProviderTypeChange(e.target.value as ProviderType)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-500 font-medium"
+                          >
+                            <option value="gemini">Google Gemini (جمینای)</option>
+                            <option value="openrouter">OpenRouter (کل مدل‌ها: DeepSeek, Claude, Llama)</option>
+                            <option value="openai">OpenAI (رسمی ChatGPT)</option>
+                            <option value="deepseek">DeepSeek (مستقیم)</option>
+                            <option value="glm">GLM / Zhipu AI</option>
+                            <option value="custom">سرور واسط / پروکسی / Groq / Local</option>
+                          </select>
+                        </div>
+
+                        {editServerData.providerType !== 'gemini' && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-slate-300 font-semibold">آدرس سرور (Base URL):</label>
+                              <span className="text-[10px] text-amber-400/90 font-mono">باید به /v1 ختم شود</span>
+                            </div>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={editServerData.baseURL}
+                              onChange={e => setEditServerData({ ...editServerData, baseURL: e.target.value })}
+                              placeholder="https://openrouter.ai/api/v1"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-slate-300 mb-1 font-semibold">مدل انتخابی این سرور:</label>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            value={editServerData.model}
+                            onChange={e => setEditServerData({ ...editServerData, model: e.target.value })}
+                            placeholder="e.g. deepseek/deepseek-r1 or gpt-4o"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-500"
+                            required
+                          />
+                        </div>
+
+                        <div className={editServerData.providerType === 'gemini' ? 'sm:col-span-2' : ''}>
+                          <label className="block text-slate-300 mb-1 font-semibold">
+                            کلید اختصاصی API Key:
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showEditKey ? 'text' : 'password'}
+                              dir="ltr"
+                              value={editServerData.apiKey}
+                              onChange={e => setEditServerData({ ...editServerData, apiKey: e.target.value })}
+                              placeholder={editServerData.providerType === 'gemini' ? 'اختیاری (در صورت خالی بودن، کلید پیش‌فرض اعمال می‌شود)' : 'sk-...'}
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 pl-10 text-white font-mono focus:outline-none focus:border-amber-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowEditKey(!showEditKey)}
+                              className="absolute left-2 top-2 text-slate-400 hover:text-white p-1"
+                              title={showEditKey ? 'مخفی کردن کلید' : 'نمایش کلید'}
+                            >
+                              {showEditKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Live Test Status inside Edit Form */}
+                      {testResults[server.id] && (
+                        <div className={`p-2.5 rounded-xl text-xs flex items-center justify-between ${
+                          testResults[server.id].success
+                            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                            : 'bg-red-500/10 border border-red-500/20 text-red-300'
+                        }`}>
+                          <div className="flex items-center gap-2">
+                            {testResults[server.id].success ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                            )}
+                            <span>
+                              {testResults[server.id].success
+                                ? `تست موفق بود! زمان پاسخگویی: ${testResults[server.id].latencyMs} میلی‌ثانیه`
+                                : `خطا در تست: ${testResults[server.id].error}`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => handleTestServer(editServerData, server.id)}
+                          disabled={testingId === server.id}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium transition flex items-center gap-1.5"
+                        >
+                          {testingId === server.id ? (
+                            <RotateCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                          ) : (
+                            <Play className="w-3 h-3 fill-current text-emerald-400" />
+                          )}
+                          <span>{testingId === server.id ? 'درحال تست اتصال...' : 'تست پینگ همین مشخصات'}</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelEdit}
+                            className="px-3.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-white"
+                          >
+                            انصراف
+                          </button>
+                          <button
+                            type="submit"
+                            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center gap-1.5 shadow-md shadow-amber-500/20"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>ذخیره تغییرات سرور</span>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              );
+            })}
             </div>
           </div>
 

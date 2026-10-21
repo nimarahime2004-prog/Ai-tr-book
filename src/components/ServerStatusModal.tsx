@@ -52,13 +52,24 @@ export const ServerStatusModal: React.FC<ServerStatusModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ masked, model: selectedModel }),
       });
-      const data = await res.json();
+      let data: any = null;
+      const rawText = await res.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        const isHtml = rawText.trim().startsWith('<') || rawText.toLowerCase().includes('<!doctype');
+        throw new Error(
+          isHtml
+            ? `پاسخ وب HTML از سرور دریافت شد (کد ${res.status}). لطفاً آدرس و تنظیمات سرور را بررسی فرمایید.`
+            : `پاسخ سرور قالب معتبر نداشت (کد ${res.status}).`
+        );
+      }
       setTestResults(prev => ({
         ...prev,
         [masked]: {
-          success: data.success,
-          latencyMs: data.latencyMs,
-          error: data.error,
+          success: Boolean(data?.success),
+          latencyMs: data?.latencyMs,
+          error: data?.error,
         },
       }));
       onRefresh();
